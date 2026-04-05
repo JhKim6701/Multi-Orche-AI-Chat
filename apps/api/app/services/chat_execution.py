@@ -10,6 +10,7 @@ from app.models import Asset, ConversationSegment, Message, ModelRegistry, RoleE
 from app.services.artifact_manager import create_ai_generated_artifact
 from app.services.asset_ingestion import retrieve_relevant_context
 from app.services.ollama_client import OllamaClient
+from app.services.runtime_state import get_gpu_enabled
 from app.services.topic_segmentation import maybe_start_new_segment, update_segment_summary
 
 
@@ -53,6 +54,12 @@ async def execute_chat(
         .order_by(ModelRegistry.sort_order.asc(), ModelRegistry.model_name.asc())
     ).all()
     execution_models = [m.model_name for m in selected_rows]
+    gpu_enabled = get_gpu_enabled()
+    if not gpu_enabled:
+        safe_rows = [m for m in selected_rows if not m.supports_vision and not m.supports_reasoning]
+        if safe_rows:
+            selected_rows = safe_rows
+            execution_models = [m.model_name for m in selected_rows]
     if not execution_models:
         raise ValueError("실행 가능한 enabled/downloaded 모델이 없습니다. 모델 sync/pull/enable 상태를 확인하세요.")
 
@@ -110,7 +117,9 @@ async def execute_chat(
         user_content = chain_input if execution_mode == "chained" else content_markdown
         prompt = f"{user_content}\n\n{context_block}" if context_block else user_content
         if has_images and not vision_allowed:
-            prompt = f"[Vision fallback: selected model has no vision capability]\n{prompt}"
+            prompt = f"[Vision fallback: selected model has no vision capability or gpu is disabled]\n{prompt}"
+        if not gpu_enabled and vision_allowed:
+            prompt = f"[GPU OFF fallback: reasoning/vision 제한 경로]\n{prompt}"
         query_messages = context_messages + [{"role": "user", "content": prompt}]
 
         response = await client.chat(
@@ -125,6 +134,7 @@ async def execute_chat(
         if has_images:
             vision_tag = "vision_used" if vision_allowed else "vision_fallback_text_only"
             answer = f"{answer}\n[Image assets] ids={image_asset_ids} ({vision_tag})"
+        answer = f"{answer}\n[Routing] gpu_enabled={gpu_enabled}"
 
         asst = Message(
             project_id=project_id,

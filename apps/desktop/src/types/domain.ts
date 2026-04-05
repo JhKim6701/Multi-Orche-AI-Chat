@@ -74,6 +74,9 @@ export interface OrchestrationRun {
   artifact_summary?: Array<{ id: number; filename: string; mime_type?: string; producing_model?: string | null; producing_role?: string | null }>;
   vision_used?: boolean;
   image_asset_ids?: number[];
+  gpu_enabled?: boolean;
+  critic_model?: string | null;
+  critic_summary?: string | null;
 }
 
 export interface OrchestrationStep {
@@ -89,6 +92,7 @@ export interface OrchestrationStep {
   used_asset_ids?: number[];
   image_asset_ids?: number[];
   vision_used?: boolean | null;
+  gpu_enabled?: boolean | null;
   used_segment_id?: number | null;
   parent_segment_summary_used?: boolean | null;
 }

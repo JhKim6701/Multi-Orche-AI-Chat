@@ -20,6 +20,7 @@ Ollama 기반 로컬 멀티모델 채팅/오케스트레이션 데스크톱 워�
 - 이미지 업로드 시 vision-capable 모델 대상으로 실제 image payload 전달(multimodal)
 - assistant 응답의 AI generated artifact(.md/.txt/.json/.py/.ts) 자동 생성 및 다운로드
 - 오케스트레이션 visual drawer 패널(역할/모델/순서/reviewer/revision/provenance) 표시
+- TopBar에서 GPU usage/memory + GPU routing 토글 표시
 
 ## 폴더 구조
 

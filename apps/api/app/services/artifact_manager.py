@@ -45,6 +45,7 @@ def create_ai_generated_artifact(
     content: str,
     model_name: str | None,
     model_role: str | None,
+    orchestration_run_id: int | None = None,
 ) -> Asset:
     kind, mime_type, default_name = _infer_artifact_type(content)
     root = Path(settings.upload_root)
@@ -56,6 +57,21 @@ def create_ai_generated_artifact(
     target = safe_join(generated_dir, filename)
     target.write_text(content, encoding="utf-8")
 
+    metadata = {
+        "kind": kind,
+        "generation_kind": kind,
+        "generated_from_message_id": message_id,
+        "source_message_id": message_id,
+    }
+    if kind == "markdown":
+        metadata["artifact_summary"] = "structured_report"
+    if kind == "code":
+        metadata["artifact_summary"] = "code_file"
+    if orchestration_run_id is not None:
+        metadata["orchestration_run_id"] = orchestration_run_id
+    if "image" in text.lower():
+        metadata["image_placeholder"] = True
+
     asset = Asset(
         project_id=project_id,
         chat_thread_id=chat_thread_id,
@@ -65,7 +81,7 @@ def create_ai_generated_artifact(
         mime_type=mime_type,
         original_filename=filename,
         stored_path=str(target),
-        derived_metadata_json={"kind": kind, "generated_from_message_id": message_id},
+        derived_metadata_json=metadata,
         producing_model=model_name,
         producing_role=model_role,
     )

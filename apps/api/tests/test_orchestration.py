@@ -67,7 +67,8 @@ def test_orchestration_run_happy_path(monkeypatch):
     payload = detail.json()
     assert payload['run']['status'] == 'completed'
     roles = [s['assigned_role'] for s in payload['steps']]
-    assert roles[:4] == ['planner', 'context_resolver', 'model_router', 'final_responder']
+    assert roles[:5] == ['planner', 'context_resolver', 'model_router', 'final_responder', 'reviewer']
+    assert 'critic' in roles
     ctx_step = next(step for step in payload['steps'] if step['assigned_role'] == 'context_resolver')
     assert 'asset' in (ctx_step.get('input_summary') or '').lower() or 'asset' in (ctx_step.get('output_summary') or '').lower()
     assert payload['final_message'] is not None
@@ -138,6 +139,8 @@ def test_orchestration_reviewer_happy_path(monkeypatch):
     detail = client.get(f'/orchestration/runs/{run_id}').json()
     assert detail['run']['reviewer_decision'] == 'approve'
     assert any(step['step_name'] == 'reviewer_critic' for step in detail['steps'])
+    assert any(step['step_name'] == 'critic_debate' for step in detail['steps'])
+    assert detail['run']['critic_model'] is not None
     assert detail['run']['used_segment_id'] is not None
 
 

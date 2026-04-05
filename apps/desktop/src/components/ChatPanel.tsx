@@ -353,6 +353,7 @@ export function ChatPanel() {
                     <a href={`${API_BASE}/assets/${asset.id}/download`} target="_blank">{asset.original_filename}</a>
                     <span>model={asset.producing_model ?? '-'}</span>
                     <span>role={asset.producing_role ?? '-'}</span>
+                    <span>kind={asset.derived_metadata_json?.kind ?? 'unknown'}</span>
                   </div>
                 ))}
               </div>
@@ -413,7 +414,8 @@ export function ChatPanel() {
               <div style={{ fontSize: 12 }}>
                 Routing reason: {runDetail?.run?.routing_reason ?? '-'} · reviewer: {runDetail?.run?.reviewer_decision ?? '-'} · parent summary used: {String(runDetail?.run?.parent_segment_summary_used ?? false)}
               </div>
-              <div style={{ fontSize: 12 }}>Used assets: {(runDetail?.run?.used_asset_ids ?? []).join(', ') || '-'} · image assets: {(runDetail?.run?.image_asset_ids ?? []).join(', ') || '-'} · vision used: {String(runDetail?.run?.vision_used ?? false)}</div>
+              <div style={{ fontSize: 12 }}>Used assets: {(runDetail?.run?.used_asset_ids ?? []).join(', ') || '-'} · image assets: {(runDetail?.run?.image_asset_ids ?? []).join(', ') || '-'} · vision used: {String(runDetail?.run?.vision_used ?? false)} · gpu enabled: {String(runDetail?.run?.gpu_enabled ?? true)}</div>
+              <div style={{ fontSize: 12 }}>Critic model: {runDetail?.run?.critic_model ?? '-'} · critic summary: {runDetail?.run?.critic_summary ?? '-'}</div>
               {runs.map((r) => <button key={r.id} onClick={() => { setSelectedRunId(r.id); setShowOrchestrationDrawer(true); }} style={{ fontSize: 11, marginRight: 4 }}>#{r.id} {r.status}</button>)}
               <button type="button" onClick={() => setShowOrchestrationDrawer(true)} style={{ fontSize: 11 }}>Open Visual Panel</button>
               {runDetail?.steps?.length ? (
@@ -485,7 +487,8 @@ export function ChatPanel() {
                 <div>#{index + 1} {step.step_name}</div>
                 <div>role={step.assigned_role} · model={step.model_name ?? '-'}</div>
                 <div>routing={step.routing_reason ?? '-'} · reviewer={step.reviewer_decision ?? '-'}</div>
-                <div>revision={step.step_name.includes('revision') ? 'yes' : 'no'} · used assets={(step.used_asset_ids ?? []).join(', ') || '-'}</div>
+                <div>role-tag={step.step_name.includes('critic') ? 'critic' : step.step_name.includes('reviewer') ? 'reviewer' : 'executor'}</div>
+                <div>revision={step.step_name.includes('revision') ? 'yes' : 'no'} · used assets={(step.used_asset_ids ?? []).join(', ') || '-'} · gpu={String(step.gpu_enabled ?? true)}</div>
               </li>
             ))}
           </ol>

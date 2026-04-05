@@ -78,7 +78,9 @@ def run_detail(run_id: int, db: Session = Depends(get_db)):
     seg = db.get(ConversationSegment, user_msg.segment_id) if user_msg and user_msg.segment_id else None
     active_step = next((step for step in steps if step.status == "running"), None)
     reviewer_step = next((step for step in steps if step.step_name == "reviewer_critic"), None)
+    critic_step = next((step for step in steps if step.step_name == "critic_debate"), None)
     reviewer_meta, _ = _extract_meta(reviewer_step.output_summary if reviewer_step else None)
+    critic_meta, critic_summary = _extract_meta(critic_step.output_summary if critic_step else None)
     reviewer_decision = reviewer_meta.get("reviewer_decision")
     provenance = {
         "routing_reason": reviewer_meta.get("routing_reason"),
@@ -88,6 +90,9 @@ def run_detail(run_id: int, db: Session = Depends(get_db)):
         "reviewer_decision": reviewer_decision,
         "image_asset_ids": reviewer_meta.get("image_asset_ids", []),
         "vision_used": reviewer_meta.get("vision_used", False),
+        "gpu_enabled": reviewer_meta.get("gpu_enabled"),
+        "critic_model": critic_step.model_name if critic_step else None,
+        "critic_summary": critic_summary,
     }
     generated_artifacts = []
     if final_message:
@@ -107,7 +112,7 @@ def run_detail(run_id: int, db: Session = Depends(get_db)):
     final_provenance_summary = (
         f"routing={provenance['routing_reason']}, assets={provenance['used_asset_ids']}, "
         f"images={provenance['image_asset_ids']}, vision_used={provenance['vision_used']}, "
-        f"segment={provenance['used_segment_id']}, reviewer={reviewer_decision}, generated_artifacts={[a['id'] for a in artifact_summary]}"
+        f"segment={provenance['used_segment_id']}, reviewer={reviewer_decision}, critic_model={provenance['critic_model']}, gpu_enabled={provenance['gpu_enabled']}, generated_artifacts={[a['id'] for a in artifact_summary]}"
     )
     return OrchestrationRunDetail(
         run={
@@ -131,6 +136,9 @@ def run_detail(run_id: int, db: Session = Depends(get_db)):
             "artifact_summary": artifact_summary,
             "vision_used": provenance["vision_used"],
             "image_asset_ids": provenance["image_asset_ids"],
+            "gpu_enabled": provenance["gpu_enabled"],
+            "critic_model": provenance["critic_model"],
+            "critic_summary": provenance["critic_summary"],
         },
         steps=[
             OrchestrationStepOut(
@@ -146,6 +154,7 @@ def run_detail(run_id: int, db: Session = Depends(get_db)):
                 used_asset_ids=_extract_meta(step.output_summary)[0].get("used_asset_ids", []),
                 image_asset_ids=_extract_meta(step.output_summary)[0].get("image_asset_ids", []),
                 vision_used=_extract_meta(step.output_summary)[0].get("vision_used"),
+                gpu_enabled=_extract_meta(step.output_summary)[0].get("gpu_enabled"),
                 used_segment_id=_extract_meta(step.output_summary)[0].get("used_segment_id"),
                 parent_segment_summary_used=_extract_meta(step.output_summary)[0].get("parent_segment_summary_used"),
             )
@@ -202,7 +211,7 @@ def stream_run_events(run_id: int, db: Session = Depends(get_db)):
                 start_type = "revision_started"
                 done_type = "revision_completed"
             yield f"event: {start_type}\ndata: {payload(start_type, step_id=step.id, step_name=step.step_name, status='running', model_name=step.model_name, reviewer_decision=meta.get('reviewer_decision'))}\n\n"
-            yield f"event: {done_type}\ndata: {payload(done_type, step_id=step.id, step_name=step.step_name, status=step.status, model_name=step.model_name, reviewer_decision=meta.get('reviewer_decision'), vision_used=meta.get('vision_used'), image_asset_ids=meta.get('image_asset_ids', []))}\n\n"
+            yield f"event: {done_type}\ndata: {payload(done_type, step_id=step.id, step_name=step.step_name, status=step.status, model_name=step.model_name, reviewer_decision=meta.get('reviewer_decision'), vision_used=meta.get('vision_used'), image_asset_ids=meta.get('image_asset_ids', []), gpu_enabled=meta.get('gpu_enabled'))}\n\n"
         end_event = "run_completed" if run.status == "completed" else "run_failed"
         yield f"event: {end_event}\ndata: {payload(end_event, status=run.status, final_message_id=run.final_message_id)}\n\n"
 

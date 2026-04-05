@@ -186,3 +186,4 @@ def test_ai_generated_artifact_persisted(monkeypatch):
     generated = [a for a in assets if a['source_type'] == 'ai_generated' and a['message_id'] == assistant_id]
     assert len(generated) >= 1
     assert generated[0]['producing_model'] == 'model-a'
+    assert generated[0]['derived_metadata_json']['generation_kind'] in {'text', 'markdown', 'json', 'code'}

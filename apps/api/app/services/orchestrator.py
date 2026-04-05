@@ -13,6 +13,7 @@ from app.models import Asset, ConversationSegment, Message, ModelRegistry, Orche
 from app.services.artifact_manager import create_ai_generated_artifact
 from app.services.asset_ingestion import retrieve_relevant_context
 from app.services.ollama_client import OllamaClient
+from app.services.runtime_state import get_gpu_enabled
 from app.services.topic_segmentation import maybe_start_new_segment, update_segment_summary
 
 
@@ -29,6 +30,7 @@ def _choose_model(
     orchestrator_model_name: str | None,
     requires_vision: bool,
     needs_reasoning: bool,
+    gpu_enabled: bool,
 ) -> tuple[str, str]:
     q = select(ModelRegistry).where(ModelRegistry.enabled.is_(True), ModelRegistry.downloaded.is_(True))
     if selected_model_names:
@@ -41,6 +43,11 @@ def _choose_model(
         chosen = next((m for m in rows if m.model_name == orchestrator_model_name), None)
         if chosen:
             return chosen.model_name, "user_selected_orchestrator_model"
+
+    if not gpu_enabled:
+        cpu_safe = [m for m in rows if not m.supports_vision and not m.supports_reasoning]
+        if cpu_safe:
+            return cpu_safe[0].model_name, "gpu_disabled_cpu_fallback"
 
     if requires_vision:
         vision = next((m for m in rows if m.supports_vision), None)
@@ -139,11 +146,14 @@ async def execute_orchestration(
         orchestrator_model_name=orchestrator_model_name,
         requires_vision=has_image,
         needs_reasoning=needs_reasoning,
+        gpu_enabled=get_gpu_enabled(),
     )
+    gpu_enabled = get_gpu_enabled()
     if has_image and needs_reasoning:
         routing_reason = f"{routing_reason}+vision_and_reasoning"
     elif has_image:
         routing_reason = f"{routing_reason}+vision_priority"
+    routing_reason = f"{routing_reason}+gpu_enabled={gpu_enabled}"
 
     parent_summary = ""
     if segment.parent_segment_id:
@@ -186,6 +196,7 @@ async def execute_orchestration(
                 output,
                 {
                     "routing_reason": routing_reason,
+                    "gpu_enabled": gpu_enabled,
                     "used_asset_ids": used_asset_ids,
                     "image_asset_ids": image_asset_ids,
                     "vision_used": has_image,
@@ -268,8 +279,9 @@ async def execute_orchestration(
         reviewer_step.output_summary = _pack_summary(
             review_text,
                 {
-                    "routing_reason": routing_reason,
-                    "reviewer_decision": reviewer_decision,
+                "routing_reason": routing_reason,
+                "gpu_enabled": gpu_enabled,
+                "reviewer_decision": reviewer_decision,
                     "used_asset_ids": used_asset_ids,
                     "image_asset_ids": image_asset_ids,
                     "vision_used": bool(image_payloads and can_use_vision),
@@ -280,12 +292,62 @@ async def execute_orchestration(
         reviewer_step.ended_at = datetime.utcnow()
 
         revised = False
+        critic_model = model_name
+        critic_reason = "same_model_fallback"
+        critic_candidate = db.scalar(
+            select(ModelRegistry)
+            .where(
+                ModelRegistry.enabled.is_(True),
+                ModelRegistry.downloaded.is_(True),
+                ModelRegistry.model_name != model_name,
+            )
+            .order_by(ModelRegistry.supports_reasoning.desc(), ModelRegistry.sort_order.asc())
+        )
+        if critic_candidate:
+            critic_model = critic_candidate.model_name
+            critic_reason = "alternate_model_for_critic"
+
+        critic_prompt = (
+            "너는 critic/debate 역할이다. 아래 draft의 취약점/반론/누락점을 3개 이내로 제시하라.\n"
+            f"user_request: {content_markdown}\n"
+            f"draft_answer: {final_text}\n"
+            f"context: {context_block or '없음'}"
+        )
+        critic_step = OrchestrationStep(
+            orchestration_run_id=run.id,
+            step_name="critic_debate",
+            assigned_role="critic",
+            model_name=critic_model,
+            status="running",
+            input_summary=_summarize(critic_prompt),
+            started_at=datetime.utcnow(),
+        )
+        db.add(critic_step)
+        db.flush()
+        critic_resp = await client.chat(model_name=critic_model, messages=[{"role": "user", "content": critic_prompt}])
+        critic_text = critic_resp.get("message", {}).get("content") or "(critic empty)"
+        critic_step.status = "completed"
+        critic_step.output_summary = _pack_summary(
+            critic_text,
+            {
+                "routing_reason": f"{routing_reason}+critic_reason={critic_reason}",
+                "gpu_enabled": gpu_enabled,
+                "used_asset_ids": used_asset_ids,
+                "image_asset_ids": image_asset_ids,
+                "vision_used": bool(image_payloads and can_use_vision),
+                "used_segment_id": segment.id,
+                "parent_segment_summary_used": parent_summary_used,
+            },
+        )
+        critic_step.ended_at = datetime.utcnow()
+
         if reviewer_decision in {"revise", "append_missing_points"}:
             revision_prompt = (
                 "reviewer 피드백을 반영해 최종 답변을 개선하라. 길이는 간결하되 누락점 보강.\n"
                 f"user_request: {content_markdown}\n"
                 f"previous_draft: {final_text}\n"
                 f"reviewer_feedback: {review_text}\n"
+                f"critic_feedback: {critic_text}\n"
                 f"context: {context_block or '없음'}"
             )
             revision_step = OrchestrationStep(
@@ -312,6 +374,7 @@ async def execute_orchestration(
                 revised_text,
                 {
                     "routing_reason": routing_reason,
+                    "gpu_enabled": gpu_enabled,
                     "reviewer_decision": reviewer_decision,
                     "used_asset_ids": used_asset_ids,
                     "image_asset_ids": image_asset_ids,
@@ -326,7 +389,7 @@ async def execute_orchestration(
         provenance_line = (
             f"[Orchestration Provenance] segment={segment.id}, assets={used_asset_ids or []}, "
             f"images={image_asset_ids or []}, vision_used={bool(image_payloads and can_use_vision)}, routing_reason={routing_reason}, parent_summary_used={parent_summary_used}, "
-            f"reviewer_decision={reviewer_decision}, revised={revised}"
+            f"reviewer_decision={reviewer_decision}, critic_model={critic_model}, revised={revised}, gpu_enabled={gpu_enabled}"
         )
         final_text = f"{final_text}\n\n{provenance_line}"
 
@@ -351,6 +414,7 @@ async def execute_orchestration(
             content=final_text,
             model_name=model_name,
             model_role=final_message.model_role,
+            orchestration_run_id=run.id,
         )
         final_message.content_markdown = (
             f"{final_message.content_markdown}\n"

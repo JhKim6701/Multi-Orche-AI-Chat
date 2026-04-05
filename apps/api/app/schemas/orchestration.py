@@ -42,6 +42,7 @@ class OrchestrationStepOut(BaseModel):
     used_asset_ids: list[int] = Field(default_factory=list)
     image_asset_ids: list[int] = Field(default_factory=list)
     vision_used: bool | None = None
+    gpu_enabled: bool | None = None
     used_segment_id: int | None = None
     parent_segment_summary_used: bool | None = None
 

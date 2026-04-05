@@ -5,7 +5,7 @@ import { TopBar } from './TopBar';
 
 (global as any).fetch = vi.fn().mockResolvedValue({
   ok: true,
-  json: async () => ({ cpu_percent: 1, memory_percent: 2, disk_percent: 3, gpu_available: false })
+  json: async () => ({ cpu_percent: 1, memory_percent: 2, disk_percent: 3, gpu_available: false, gpu_usage: null, gpu_memory: null, gpu_enabled: true })
 });
 
 test('renders hardware labels', async () => {
