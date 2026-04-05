@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "test": "vitest"
+    "test": "vitest",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "tauri:dev:with-web": "concurrently -k \"npm run dev\" \"npm run tauri:dev\""
   },
   "dependencies": {
     "react": "^18.3.1",
@@ -21,8 +24,10 @@
     "vite": "^5.4.3",
     "vitest": "^2.0.5",
     "@testing-library/react": "^16.0.0",
+    "@tauri-apps/cli": "^2.0.2",
     "@types/react": "^18.3.5",
     "@types/react-dom": "^18.3.0",
+    "concurrently": "^9.0.1",
     "@vitejs/plugin-react": "^4.3.1"
   }
 }

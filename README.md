@@ -17,6 +17,9 @@ Ollama 기반 로컬 멀티모델 채팅/오케스트레이션 데스크톱 워�
 - 상단 하드웨어 메트릭 polling
 - 오케스트레이터 ON 시 rule-based orchestration 실행 (planner/context_resolver/model_router/final_responder)
 - topic-aware segmentation: 주제 전환 시 새 segment 자동 분리 + 관련 segment 중심 문맥 스코핑
+- 이미지 업로드 시 vision-capable 모델 대상으로 실제 image payload 전달(multimodal)
+- assistant 응답의 AI generated artifact(.md/.txt/.json/.py/.ts) 자동 생성 및 다운로드
+- 오케스트레이션 visual drawer 패널(역할/모델/순서/reviewer/revision/provenance) 표시
 
 ## 폴더 구조
 
@@ -55,6 +58,29 @@ uvicorn app.main:app --reload --port 8000
 cd apps/desktop
 npm install
 npm run dev
+```
+
+### 5) Tauri Desktop 실행 (개발/빌드)
+
+Tauri prerequisite(Rust toolchain, OS별 WebView/runtime)가 준비된 환경에서:
+
+```bash
+cd apps/desktop
+npm install
+npm run tauri:dev
+```
+
+웹 dev 서버와 Tauri를 함께 올리려면:
+
+```bash
+npm run tauri:dev:with-web
+```
+
+프로덕션 빌드:
+
+```bash
+npm run build
+npm run tauri:build
 ```
 
 ## 핵심 API
