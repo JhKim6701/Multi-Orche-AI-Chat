@@ -43,6 +43,7 @@ export interface OrchestrationRun {
   status: string;
   graph_name: string;
   started_at: string;
+  final_message_id?: number;
 }
 
 export interface OrchestrationStep {
@@ -50,5 +51,7 @@ export interface OrchestrationStep {
   step_name: string;
   assigned_role: string;
   status: string;
+  model_name?: string | null;
+  input_summary?: string | null;
   output_summary?: string | null;
 }

@@ -13,6 +13,8 @@ export function ModelPanel() {
   const setExecutionMode = useUiStore((s) => s.setExecutionMode);
   const selectedModelNames = useUiStore((s) => s.selectedModelNames);
   const toggleSelectedModel = useUiStore((s) => s.toggleSelectedModel);
+  const orchestratorModelName = useUiStore((s) => s.orchestratorModelName);
+  const setOrchestratorModelName = useUiStore((s) => s.setOrchestratorModelName);
 
   const { data: models = [], isLoading, error } = useQuery({ queryKey: ['models'], queryFn: () => api.get<Model[]>('/models') });
 
@@ -26,6 +28,8 @@ export function ModelPanel() {
     [models, selectedModelNames]
   );
 
+  const runnableModels = models.filter((m) => m.downloaded && m.enabled);
+
   return (
     <aside style={{ padding: 8, height: '100%', overflow: 'auto', borderLeft: '1px solid #eee' }}>
       <h3 style={{ margin: '4px 0' }}>Models</h3>
@@ -34,11 +38,25 @@ export function ModelPanel() {
       </button>
 
       <div style={{ marginBottom: 8 }}>
-        <label style={{ fontSize: 12 }}>Execution Mode </label>
+        <label style={{ fontSize: 12 }}>Manual Execution Mode </label>
         <select value={executionMode} onChange={(e) => setExecutionMode(e.target.value as any)} style={{ fontSize: 12 }}>
           <option value="independent">independent</option>
           <option value="chained">chained</option>
           <option value="ordered">ordered</option>
+        </select>
+      </div>
+
+      <div style={{ marginBottom: 8 }}>
+        <label style={{ fontSize: 12 }}>Orchestrator Model </label>
+        <select
+          value={orchestratorModelName ?? ''}
+          onChange={(e) => setOrchestratorModelName(e.target.value || undefined)}
+          style={{ fontSize: 12 }}
+        >
+          <option value="">(auto fallback)</option>
+          {runnableModels.map((m) => (
+            <option key={m.id} value={m.model_name}>{m.model_name}</option>
+          ))}
         </select>
       </div>
 
@@ -66,7 +84,7 @@ export function ModelPanel() {
 
       <hr />
       <div style={{ fontSize: 12 }}>
-        <strong>Execution Order (sort_order)</strong>
+        <strong>Manual Execution Order (sort_order)</strong>
         {selectedModelsOrdered.length === 0 ? <div>none</div> : selectedModelsOrdered.map((m, idx) => <div key={m.id}>{idx + 1}. {m.model_name}</div>)}
       </div>
     </aside>

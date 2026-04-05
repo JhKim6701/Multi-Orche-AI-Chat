@@ -36,8 +36,8 @@
 - `PATCH /models/{model_id}/toggle`
 - `PATCH /models/{model_id}/sort`
 
-## Orchestration (minimal)
-- `POST /orchestration/run`
+## Orchestration
+- `POST /orchestration/run` (rule-based steps + final response persist)
 - `GET /orchestration/runs?chat_thread_id={id}`
-- `GET /orchestration/runs/{run_id}`
+- `GET /orchestration/runs/{run_id}` (run metadata + ordered steps + final message)
 - `GET /orchestration/runs/{run_id}/stream`

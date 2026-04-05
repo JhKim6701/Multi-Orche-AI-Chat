@@ -8,11 +8,13 @@ interface UiState {
   selectedProjectId?: number;
   selectedChatId?: number;
   selectedModelNames: string[];
+  orchestratorModelName?: string;
   toggleOrchestrator: () => void;
   setExecutionMode: (mode: ExecutionMode) => void;
   setSelectedProject: (id?: number) => void;
   setSelectedChat: (id?: number) => void;
   toggleSelectedModel: (name: string) => void;
+  setOrchestratorModelName: (name?: string) => void;
 }
 
 const load = <T,>(key: string, fallback: T): T => {
@@ -31,6 +33,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   selectedProjectId: load<number | undefined>('selectedProjectId', undefined),
   selectedChatId: load<number | undefined>('selectedChatId', undefined),
   selectedModelNames: load<string[]>('selectedModelNames', []),
+  orchestratorModelName: load<string | undefined>('orchestratorModelName', undefined),
 
   toggleOrchestrator: () => {
     const next = !get().orchestratorOn;
@@ -54,5 +57,9 @@ export const useUiStore = create<UiState>((set, get) => ({
     const next = exists ? get().selectedModelNames.filter((x) => x !== name) : [...get().selectedModelNames, name];
     localStorage.setItem('selectedModelNames', JSON.stringify(next));
     set({ selectedModelNames: next });
+  },
+  setOrchestratorModelName: (name) => {
+    localStorage.setItem('orchestratorModelName', JSON.stringify(name));
+    set({ orchestratorModelName: name });
   }
 }));

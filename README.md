@@ -14,7 +14,7 @@ Ollama 기반 로컬 멀티모델 채팅/오케스트레이션 데스크톱 워�
 - 파일 업로드 + 프로젝트/채팅 경로 저장 + asset metadata DB 기록
 - 모델 Sync/Pull/Toggle/Sort (우측 패널과 API 연결)
 - 상단 하드웨어 메트릭 polling
-- 오케스트레이터 ON 시 최소 run 생성
+- 오케스트레이터 ON 시 rule-based orchestration 실행 (planner/context_resolver/model_router/final_responder)
 
 ## 폴더 구조
 
@@ -64,7 +64,9 @@ npm run dev
 - `GET /messages/stream?...` (SSE 단일 모델 스트림)
 - `POST /assets/upload`, `GET /assets/chat/{chat_id}`
 - `POST /models/sync`, `POST /models/pull`, `PATCH /models/{id}/toggle`, `PATCH /models/{id}/sort`
-- `POST /orchestration/run`
+- `POST /orchestration/run` (실제 step 실행 + 최종 메시지 저장)
+- `GET /orchestration/runs/{id}` (step intermediate + final message 포함)
+- `GET /orchestration/runs/{id}/stream` (run/step 이벤트)
 
 ## 테스트
 
