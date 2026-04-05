@@ -56,12 +56,17 @@ async def execute_message(payload: MessageExecutionRequest, db: Session = Depend
 
 
 @router.get("/stream")
-async def stream_single_model(chat_thread_id: int, model_name: str, prompt: str):
+async def stream_single_model(chat_thread_id: int, model_name: str, prompt: str, db: Session = Depends(get_db)):
     client = OllamaClient()
+    history = db.scalars(select(Message).where(Message.chat_thread_id == chat_thread_id).order_by(Message.sequence_no.asc())).all()
+    stream_messages = [
+        {"role": m.role.value if hasattr(m.role, "value") else str(m.role), "content": m.content_markdown}
+        for m in history[-10:]
+    ] + [{"role": "user", "content": prompt}]
 
     async def gen():
         try:
-            async for line in client.stream_chat(model_name=model_name, messages=[{"role": "user", "content": prompt}]):
+            async for line in client.stream_chat(model_name=model_name, messages=stream_messages):
                 yield f"data: {line}\n\n"
         except OllamaUnavailableError as exc:
             yield f"event: error\ndata: {json.dumps({'detail': str(exc)})}\n\n"

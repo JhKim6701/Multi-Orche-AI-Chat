@@ -19,6 +19,7 @@ export function ChatPanel() {
   const [file, setFile] = useState<File | null>(null);
   const [sending, setSending] = useState(false);
   const [selectedRunId, setSelectedRunId] = useState<number | null>(null);
+  const [streamPreview, setStreamPreview] = useState('');
 
   const { data: messages = [], error: messageError } = useQuery({
     queryKey: ['messages', selectedChatId],
@@ -72,6 +73,7 @@ export function ChatPanel() {
       }),
     onSuccess: () => {
       setMessage('');
+      setStreamPreview('');
       qc.invalidateQueries({ queryKey: ['messages', selectedChatId] });
       qc.invalidateQueries({ queryKey: ['assets', selectedChatId] });
     }
@@ -91,6 +93,30 @@ export function ChatPanel() {
   });
 
   const canSend = !!selectedChatId && !!selectedProjectId && !!message.trim() && selectedModelNames.length > 0;
+
+  const previewStream = async () => {
+    if (!selectedChatId || selectedModelNames.length === 0 || !message.trim()) return;
+    const url = new URL(`${API_BASE}/messages/stream`);
+    url.searchParams.set('chat_thread_id', String(selectedChatId));
+    url.searchParams.set('model_name', selectedModelNames[0]);
+    url.searchParams.set('prompt', message);
+
+    const res = await fetch(url.toString());
+    if (!res.ok || !res.body) {
+      setStreamPreview('stream unavailable');
+      return;
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let text = '';
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      text += decoder.decode(value, { stream: true });
+      setStreamPreview(text.slice(-3000));
+    }
+  };
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -172,11 +198,17 @@ export function ChatPanel() {
       <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         <textarea value={message} onChange={(e) => setMessage(e.target.value)} rows={4} placeholder="Type message..." style={{ fontSize: 13 }} />
         <input type="file" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6 }}>
           <small>{sending ? 'Processing request...' : 'Ready'}</small>
-          <button type="submit" disabled={!canSend || sending} style={{ fontSize: 12 }}>Send</button>
+          <div style={{ display: 'flex', gap: 4 }}>
+            <button type="button" onClick={previewStream} style={{ fontSize: 12 }}>Stream Preview</button>
+            <button type="submit" disabled={!canSend || sending} style={{ fontSize: 12 }}>Send</button>
+          </div>
         </div>
       </form>
+      {streamPreview && (
+        <pre style={{ margin: 0, maxHeight: 120, overflow: 'auto', fontSize: 11, background: '#f5f5f5', padding: 6 }}>{streamPreview}</pre>
+      )}
       {runMutation.error && <p style={{ color: 'red' }}>{(runMutation.error as Error).message}</p>}
     </main>
   );
