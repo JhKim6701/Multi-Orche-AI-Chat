@@ -84,6 +84,10 @@ export interface OrchestrationRun {
   gpu_enabled?: boolean;
   critic_model?: string | null;
   critic_summary?: string | null;
+  approval_status?: string | null;
+  pending_final_draft?: string | null;
+  execution_graph_summary?: { parallel_groups?: Record<string, number[]>; step_count?: number };
+  final_publish_status?: string | null;
 }
 
 export interface OrchestrationStep {
@@ -102,4 +106,11 @@ export interface OrchestrationStep {
   gpu_enabled?: boolean | null;
   used_segment_id?: number | null;
   parent_segment_summary_used?: boolean | null;
+  step_group?: string | null;
+  depends_on_step_ids?: number[];
+  execution_mode?: string | null;
+  retry_count?: number;
+  fallback_model_name?: string | null;
+  approval_required?: boolean | null;
+  approval_status?: string | null;
 }

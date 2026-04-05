@@ -12,6 +12,7 @@ class OrchestrationRunCreate(BaseModel):
     selected_model_names: list[str] = Field(default_factory=list)
     orchestrator_model_name: str | None = None
     message_asset_ids: list[int] = Field(default_factory=list)
+    require_approval_before_publish: bool = False
 
 
 class OrchestrationRunOut(BaseModel):
@@ -45,6 +46,12 @@ class OrchestrationStepOut(BaseModel):
     gpu_enabled: bool | None = None
     used_segment_id: int | None = None
     parent_segment_summary_used: bool | None = None
+    step_group: str | None = None
+    depends_on_step_ids: list[int] = Field(default_factory=list)
+    execution_mode: str | None = None
+    fallback_model_name: str | None = None
+    approval_required: bool | None = None
+    approval_status: str | None = None
 
 
 class OrchestrationRunDetail(BaseModel):

@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Asset, ConversationSegment, Message, ModelRegistry, OrchestrationRun, OrchestrationStep, RoleEnum
 from app.services.artifact_manager import create_ai_generated_artifact
+from app.services.approval_state import set_pending
 from app.services.asset_ingestion import retrieve_relevant_context
 from app.services.ollama_client import OllamaClient
 from app.services.runtime_state import get_gpu_enabled
@@ -101,6 +102,7 @@ async def execute_orchestration(
     selected_model_names: list[str],
     orchestrator_model_name: str | None,
     message_asset_ids: list[int],
+    require_approval_before_publish: bool = False,
 ) -> OrchestrationRun:
     max_seq = db.scalar(select(func.max(Message.sequence_no)).where(Message.chat_thread_id == chat_thread_id)) or 0
     segment, divergence = maybe_start_new_segment(db, chat_thread_id, content_markdown)
@@ -169,6 +171,15 @@ async def execute_orchestration(
         StepPlan("context_resolver", "context_resolver", context_prompt),
         StepPlan("model_router", "model_router", router_prompt),
     ]
+    specialist_role = None
+    if has_image:
+        specialist_role = "vision specialist"
+    elif "```" in content_markdown or any(tok in content_markdown.lower() for tok in ["code", "python", "typescript", "javascript"]):
+        specialist_role = "code specialist"
+    elif context_hits:
+        specialist_role = "document specialist"
+    if specialist_role:
+        step_plans.append(StepPlan("specialist_analyzer", "specialist_analyzer", f"{specialist_role} 관점으로 요청을 분석: {content_markdown}"))
 
     client = OllamaClient()
     step_outputs: list[str] = []
@@ -176,6 +187,14 @@ async def execute_orchestration(
     parent_summary_used = bool(parent_summary)
 
     try:
+        graph_groups = {
+            "planner": "planning",
+            "context_resolver": "analysis_parallel",
+            "specialist_analyzer": "analysis_parallel",
+            "model_router": "routing",
+        }
+        step_id_map: dict[str, int] = {}
+
         for index, plan in enumerate(step_plans):
             step = OrchestrationStep(
                 orchestration_run_id=run.id,
@@ -188,9 +207,40 @@ async def execute_orchestration(
             )
             db.add(step)
             db.flush()
+            step_id_map[plan.name] = step.id
+            depends = []
+            if plan.name in {"context_resolver", "specialist_analyzer"}:
+                depends = [step_id_map.get("planner")] if step_id_map.get("planner") else []
+            elif plan.name == "model_router":
+                depends = [sid for sid in [step_id_map.get("context_resolver"), step_id_map.get("specialist_analyzer")] if sid]
 
-            resp = await client.chat(model_name=model_name, messages=[{"role": "user", "content": plan.prompt}])
-            output = resp.get("message", {}).get("content") or "(empty)"
+            call_model = model_name
+            retry_count = 0
+            fallback_model_name = None
+
+            resp = await client.chat(model_name=call_model, messages=[{"role": "user", "content": plan.prompt}])
+            output = resp.get("message", {}).get("content") or ""
+            if not output.strip():
+                retry_count = 1
+                resp = await client.chat(model_name=call_model, messages=[{"role": "user", "content": plan.prompt}])
+                output = resp.get("message", {}).get("content") or ""
+            if not output.strip():
+                fallback = db.scalar(
+                    select(ModelRegistry)
+                    .where(
+                        ModelRegistry.enabled.is_(True),
+                        ModelRegistry.downloaded.is_(True),
+                        ModelRegistry.model_name != call_model,
+                    )
+                    .order_by(ModelRegistry.sort_order.asc())
+                )
+                if fallback:
+                    fallback_model_name = fallback.model_name
+                    call_model = fallback_model_name
+                    resp = await client.chat(model_name=call_model, messages=[{"role": "user", "content": plan.prompt}])
+                    output = resp.get("message", {}).get("content") or "(empty)"
+                else:
+                    output = "(empty)"
             step.status = "completed"
             step.output_summary = _pack_summary(
                 output,
@@ -202,10 +252,17 @@ async def execute_orchestration(
                     "vision_used": has_image,
                     "used_segment_id": segment.id,
                     "parent_segment_summary_used": parent_summary_used,
+                    "step_group": graph_groups.get(plan.name, "sequential"),
+                    "depends_on_step_ids": depends,
+                    "execution_mode": "parallel_candidate" if plan.name in {"context_resolver", "specialist_analyzer"} else "sequential",
+                    "retry_count": retry_count,
+                    "fallback_model_name": fallback_model_name,
+                    "approval_required": require_approval_before_publish,
+                    "approval_status": "not_required" if not require_approval_before_publish else "pending",
                 },
             )
             step.ended_at = datetime.utcnow()
-            step.retry_count = 0
+            step.retry_count = retry_count
             step_outputs.append(f"[{index + 1}:{plan.role}] {output}")
             db.flush()
 
@@ -226,6 +283,7 @@ async def execute_orchestration(
         )
         db.add(final_step)
         db.flush()
+        step_id_map["final_responder"] = final_step.id
 
         vision_model = db.scalar(select(ModelRegistry).where(ModelRegistry.model_name == model_name))
         can_use_vision = bool(vision_model and vision_model.supports_vision)
@@ -249,6 +307,13 @@ async def execute_orchestration(
                     "vision_used": bool(image_payloads and can_use_vision),
                     "used_segment_id": segment.id,
                     "parent_segment_summary_used": parent_summary_used,
+                    "step_group": "response",
+                    "depends_on_step_ids": [sid for sid in [step_id_map.get("model_router")] if sid],
+                    "execution_mode": "sequential",
+                    "retry_count": 0,
+                    "fallback_model_name": None,
+                    "approval_required": require_approval_before_publish,
+                    "approval_status": "pending" if require_approval_before_publish else "not_required",
                 },
             )
         final_step.ended_at = datetime.utcnow()
@@ -287,6 +352,13 @@ async def execute_orchestration(
                     "vision_used": bool(image_payloads and can_use_vision),
                     "used_segment_id": segment.id,
                     "parent_segment_summary_used": parent_summary_used,
+                    "step_group": "quality_gate",
+                    "depends_on_step_ids": [step_id_map.get("final_responder")] if step_id_map.get("final_responder") else [],
+                    "execution_mode": "sequential",
+                    "retry_count": 0,
+                    "fallback_model_name": None,
+                    "approval_required": require_approval_before_publish,
+                    "approval_status": "pending" if require_approval_before_publish else "not_required",
                 },
             )
         reviewer_step.ended_at = datetime.utcnow()
@@ -337,6 +409,13 @@ async def execute_orchestration(
                 "vision_used": bool(image_payloads and can_use_vision),
                 "used_segment_id": segment.id,
                 "parent_segment_summary_used": parent_summary_used,
+                "step_group": "quality_gate",
+                "depends_on_step_ids": [step_id_map.get("final_responder")] if step_id_map.get("final_responder") else [],
+                "execution_mode": "sequential",
+                "retry_count": 0,
+                "fallback_model_name": None,
+                "approval_required": require_approval_before_publish,
+                "approval_status": "pending" if require_approval_before_publish else "not_required",
             },
         )
         critic_step.ended_at = datetime.utcnow()
@@ -382,6 +461,13 @@ async def execute_orchestration(
                     "used_segment_id": segment.id,
                     "parent_segment_summary_used": parent_summary_used,
                     "revision_applied": True,
+                    "step_group": "quality_gate",
+                    "depends_on_step_ids": [reviewer_step.id, critic_step.id],
+                    "execution_mode": "sequential",
+                    "retry_count": 0,
+                    "fallback_model_name": None,
+                    "approval_required": require_approval_before_publish,
+                    "approval_status": "pending" if require_approval_before_publish else "not_required",
                 },
             )
             revision_step.ended_at = datetime.utcnow()
@@ -393,38 +479,54 @@ async def execute_orchestration(
         )
         final_text = f"{final_text}\n\n{provenance_line}"
 
-        final_message = Message(
-            project_id=project_id,
-            chat_thread_id=chat_thread_id,
-            segment_id=segment.id,
-            role=RoleEnum.assistant,
-            content_markdown=final_text,
-            plain_text_cache=final_text,
-            sequence_no=max_seq + 2,
-            model_name=model_name,
-            model_role="final_responder_revised" if revised else "final_responder",
-        )
-        db.add(final_message)
-        db.flush()
-        generated_artifact = create_ai_generated_artifact(
-            db,
-            project_id=project_id,
-            chat_thread_id=chat_thread_id,
-            message_id=final_message.id,
-            content=final_text,
-            model_name=model_name,
-            model_role=final_message.model_role,
-            orchestration_run_id=run.id,
-        )
-        final_message.content_markdown = (
-            f"{final_message.content_markdown}\n"
-            f"[Generated artifact] #{generated_artifact.id}:{generated_artifact.original_filename}"
-        )
-        final_message.plain_text_cache = final_message.content_markdown
+        if require_approval_before_publish:
+            set_pending(
+                run.id,
+                {
+                    "project_id": project_id,
+                    "chat_thread_id": chat_thread_id,
+                    "segment_id": segment.id,
+                    "content_markdown": final_text,
+                    "model_name": model_name,
+                    "model_role": "final_responder_revised" if revised else "final_responder",
+                    "sequence_no": max_seq + 2,
+                    "approval_status": "pending",
+                },
+            )
+            run.status = "approval_pending"
+        else:
+            final_message = Message(
+                project_id=project_id,
+                chat_thread_id=chat_thread_id,
+                segment_id=segment.id,
+                role=RoleEnum.assistant,
+                content_markdown=final_text,
+                plain_text_cache=final_text,
+                sequence_no=max_seq + 2,
+                model_name=model_name,
+                model_role="final_responder_revised" if revised else "final_responder",
+            )
+            db.add(final_message)
+            db.flush()
+            generated_artifact = create_ai_generated_artifact(
+                db,
+                project_id=project_id,
+                chat_thread_id=chat_thread_id,
+                message_id=final_message.id,
+                content=final_text,
+                model_name=model_name,
+                model_role=final_message.model_role,
+                orchestration_run_id=run.id,
+            )
+            final_message.content_markdown = (
+                f"{final_message.content_markdown}\n"
+                f"[Generated artifact] #{generated_artifact.id}:{generated_artifact.original_filename}"
+            )
+            final_message.plain_text_cache = final_message.content_markdown
+            run.final_message_id = final_message.id
+            run.status = "completed"
+            update_segment_summary(db, segment.id)
 
-        update_segment_summary(db, segment.id)
-        run.final_message_id = final_message.id
-        run.status = "completed"
         run.ended_at = datetime.utcnow()
         db.commit()
         db.refresh(run)

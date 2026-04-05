@@ -47,6 +47,10 @@ type StreamEvent = {
   timestamp: string;
   final_message_id?: number | null;
   reviewer_decision?: string | null;
+  assigned_role?: string | null;
+  fallback_model_name?: string | null;
+  retry_count?: number;
+  approval_status?: string | null;
 };
 
 export function ChatPanel() {
@@ -69,6 +73,7 @@ export function ChatPanel() {
   const [selectedSegmentId, setSelectedSegmentId] = useState<number | null>(null);
   const [divergence, setDivergence] = useState<DetectResponse | null>(null);
   const [liveEvents, setLiveEvents] = useState<StreamEvent[]>([]);
+  const [requireApprovalBeforePublish, setRequireApprovalBeforePublish] = useState(false);
 
   const queryScope = viewMode === 'segment' ? 'segment' : viewMode;
   const scopeQuery = viewMode === 'segment' && selectedSegmentId ? `&segment_id=${selectedSegmentId}` : '';
@@ -134,7 +139,7 @@ export function ChatPanel() {
 
   const { data: runDetail } = useQuery({
     queryKey: ['orchestration-run-detail', selectedRunId],
-    queryFn: () => api.get<{ run: OrchestrationRun & { final_message_id?: number; segment_id?: number; generated_artifact_ids?: number[]; artifact_summary?: Array<{ id: number; filename: string; producing_model?: string; producing_role?: string }>; vision_used?: boolean; image_asset_ids?: number[] }; steps: OrchestrationStep[]; final_message?: { content_markdown: string; final_provenance_summary?: string; generated_artifact_ids?: number[] } }>(`/orchestration/runs/${selectedRunId}`),
+    queryFn: () => api.get<{ run: OrchestrationRun & { final_message_id?: number; segment_id?: number; generated_artifact_ids?: number[]; artifact_summary?: Array<{ id: number; filename: string; producing_model?: string; producing_role?: string }>; vision_used?: boolean; image_asset_ids?: number[]; approval_status?: string; pending_final_draft?: string; execution_graph_summary?: { parallel_groups?: Record<string, number[]>; step_count?: number }; final_publish_status?: string }; steps: OrchestrationStep[]; final_message?: { content_markdown: string; final_provenance_summary?: string; generated_artifact_ids?: number[] } }>(`/orchestration/runs/${selectedRunId}`),
     enabled: !!selectedRunId && orchestratorOn,
     refetchInterval: orchestratorOn ? 3000 : false,
   });
@@ -217,7 +222,8 @@ export function ChatPanel() {
         content_markdown: message,
         selected_model_names: selectedModelNames,
         orchestrator_model_name: orchestratorModelName,
-        message_asset_ids: assetIds
+        message_asset_ids: assetIds,
+        require_approval_before_publish: requireApprovalBeforePublish,
       }),
     onSuccess: (run) => {
       setMessage('');
@@ -225,6 +231,20 @@ export function ChatPanel() {
       qc.invalidateQueries({ queryKey: ['orchestration-runs', selectedChatId] });
       qc.invalidateQueries({ queryKey: ['messages', selectedChatId] });
       qc.invalidateQueries({ queryKey: ['segments', selectedChatId] });
+    }
+  });
+  const approveRunMutation = useMutation({
+    mutationFn: (runId: number) => api.post(`/orchestration/runs/${runId}/approve`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['orchestration-run-detail', selectedRunId] });
+      qc.invalidateQueries({ queryKey: ['messages', selectedChatId] });
+    }
+  });
+  const rejectRunMutation = useMutation({
+    mutationFn: (runId: number) => api.post(`/orchestration/runs/${runId}/reject`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['orchestration-run-detail', selectedRunId] });
+      qc.invalidateQueries({ queryKey: ['messages', selectedChatId] });
     }
   });
 
@@ -417,6 +437,18 @@ export function ChatPanel() {
               </div>
               <div style={{ fontSize: 12 }}>Used assets: {(runDetail?.run?.used_asset_ids ?? []).join(', ') || '-'} · image assets: {(runDetail?.run?.image_asset_ids ?? []).join(', ') || '-'} · vision used: {String(runDetail?.run?.vision_used ?? false)} · gpu enabled: {String(runDetail?.run?.gpu_enabled ?? true)}</div>
               <div style={{ fontSize: 12 }}>Critic model: {runDetail?.run?.critic_model ?? '-'} · critic summary: {runDetail?.run?.critic_summary ?? '-'}</div>
+              <div style={{ fontSize: 12 }}>Approval: {runDetail?.run?.approval_status ?? '-'} · publish: {runDetail?.run?.final_publish_status ?? '-'}</div>
+              {runDetail?.run?.pending_final_draft && (
+                <div style={{ fontSize: 12, border: '1px dashed #ccc', padding: 6, marginTop: 4 }}>
+                  Pending draft: {runDetail.run.pending_final_draft.slice(0, 300)}
+                </div>
+              )}
+              {runDetail?.run?.approval_status === 'pending' && selectedRunId && (
+                <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+                  <button onClick={() => approveRunMutation.mutate(selectedRunId)} style={{ fontSize: 11 }}>Approve publish</button>
+                  <button onClick={() => rejectRunMutation.mutate(selectedRunId)} style={{ fontSize: 11 }}>Reject run</button>
+                </div>
+              )}
               {runs.map((r) => <button key={r.id} onClick={() => { setSelectedRunId(r.id); setShowOrchestrationDrawer(true); }} style={{ fontSize: 11, marginRight: 4 }}>#{r.id} {r.status}</button>)}
               <button type="button" onClick={() => setShowOrchestrationDrawer(true)} style={{ fontSize: 11 }}>Open Visual Panel</button>
               {runDetail?.steps?.length ? (
@@ -426,9 +458,10 @@ export function ChatPanel() {
                       <div><strong>{step.step_name}</strong> role={step.assigned_role} model={step.model_name ?? '-'}</div>
                       <div>input: {step.input_summary ?? '-'}</div>
                       <div>output: {step.output_summary ?? '-'}</div>
-                      <div>routing_reason: {step.routing_reason ?? '-'} · reviewer_decision: {step.reviewer_decision ?? '-'}</div>
+                      <div>routing_reason: {step.routing_reason ?? '-'} · reviewer_decision: {step.reviewer_decision ?? '-'} · execution_mode: {step.execution_mode ?? '-'}</div>
                       <div>used_asset_ids: {(step.used_asset_ids ?? []).join(', ') || '-'} · image_asset_ids: {(step.image_asset_ids ?? []).join(', ') || '-'} · vision_used: {String(step.vision_used ?? false)}</div>
-                      <div>used_segment: {step.used_segment_id ?? '-'} · parent_summary_used: {String(step.parent_segment_summary_used ?? false)}</div>
+                      <div>used_segment: {step.used_segment_id ?? '-'} · parent_summary_used: {String(step.parent_segment_summary_used ?? false)} · retry={step.retry_count ?? 0} · fallback={step.fallback_model_name ?? '-'}</div>
+                      <div>group={step.step_group ?? '-'} · depends_on={(step.depends_on_step_ids ?? []).join(', ') || '-'} · approval={step.approval_status ?? '-'}</div>
                     </li>
                   ))}
                 </ol>
@@ -436,8 +469,8 @@ export function ChatPanel() {
               {!!liveEvents.length && (
                 <div style={{ marginTop: 6, fontSize: 11, borderTop: '1px dashed #ddd', paddingTop: 6 }}>
                   {liveEvents.map((evt, idx) => (
-                    <div key={`${evt.timestamp}-${idx}`}>
-                      [{evt.event_type}] step={evt.step_name ?? '-'} status={evt.status} model={evt.model_name ?? '-'} seg#{evt.segment_id ?? '-'} reviewer={evt.reviewer_decision ?? '-'}
+                    <div key={`${evt.timestamp}-${idx}`} style={{ background: evt.event_type.includes('retry') || evt.event_type.includes('fallback') ? '#fff3e0' : evt.event_type.includes('approval') ? '#e8f5e9' : 'transparent' }}>
+                      [{evt.event_type}] step={evt.step_name ?? '-'} role={evt.assigned_role ?? '-'} status={evt.status} model={evt.model_name ?? '-'} fallback={evt.fallback_model_name ?? '-'} retry={evt.retry_count ?? 0} approval={evt.approval_status ?? '-'}
                     </div>
                   ))}
                 </div>
@@ -452,6 +485,12 @@ export function ChatPanel() {
         <input type="file" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
         {visionPending && <small style={{ color: '#0a66c2' }}>Vision badge: 이미지 업로드 감지됨, vision-capable 모델이면 이미지 입력 경로 사용</small>}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6 }}>
+          {orchestratorOn && (
+            <label style={{ fontSize: 11 }}>
+              <input type="checkbox" checked={requireApprovalBeforePublish} onChange={(e) => setRequireApprovalBeforePublish(e.target.checked)} />
+              require approval before publish
+            </label>
+          )}
           <small>{sending ? 'Processing request...' : `Ready · scope=${queryScope}${queryScope === 'segment' ? `#${selectedSegmentId}` : ''}`}</small>
           <div style={{ display: 'flex', gap: 4 }}>
             <button type="button" onClick={previewStream} style={{ fontSize: 12 }}>Stream Preview</button>
@@ -482,6 +521,8 @@ export function ChatPanel() {
           <div style={{ fontSize: 12, marginTop: 8 }}>run #{selectedRunId ?? '-'} · routing={runDetail?.run?.routing_reason ?? '-'} · reviewer={runDetail?.run?.reviewer_decision ?? '-'}</div>
           <div style={{ fontSize: 12 }}>vision={String(runDetail?.run?.vision_used ?? false)} · images={(runDetail?.run?.image_asset_ids ?? []).join(', ') || '-'}</div>
           <div style={{ fontSize: 12 }}>generated artifacts={(runDetail?.run?.generated_artifact_ids ?? []).join(', ') || '-'}</div>
+          <div style={{ fontSize: 12 }}>graph summary: steps={runDetail?.run?.execution_graph_summary?.step_count ?? 0}</div>
+          <div style={{ fontSize: 12 }}>parallel groups: {JSON.stringify(runDetail?.run?.execution_graph_summary?.parallel_groups ?? {})}</div>
           <ol style={{ paddingLeft: 18, marginTop: 10 }}>
             {(runDetail?.steps ?? []).map((step, index) => (
               <li key={step.id} style={{ marginBottom: 8, background: activeStepId === step.id ? '#fff7d6' : '#f9f9f9', padding: 6, borderRadius: 6 }}>

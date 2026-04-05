@@ -32,6 +32,16 @@ async def _mock_chat_revise(self, model_name: str, messages: list[dict], images=
     return {'message': {'content': f'[{model_name}] {prompt[:30]}'}}
 
 
+async def _mock_chat_retry_then_ok(self, model_name: str, messages: list[dict], images=None, options=None):
+    prompt = messages[-1]["content"]
+    if "모델 라우팅 결정" in prompt and not hasattr(self, "_retry_once"):
+        self._retry_once = True
+        return {'message': {'content': ''}}
+    if "decision: approve|revise|append_missing_points" in prompt:
+        return {'message': {'content': 'decision: approve'}}
+    return {'message': {'content': f'[{model_name}] ok'}}
+
+
 def _seed_model(monkeypatch):
     monkeypatch.setattr(OllamaClient, 'list_models', _mock_list_models)
     assert client.post('/models/sync').status_code == 200
@@ -119,6 +129,7 @@ def test_orchestration_stream_payload_shape(monkeypatch):
     assert 'timestamp' in body
     assert 'final_message_id' in body
     assert 'reviewer_completed' in body
+    assert 'critic_completed' in body
 
 
 def test_orchestration_reviewer_happy_path(monkeypatch):
@@ -216,3 +227,58 @@ def test_orchestration_vision_path_with_image(monkeypatch):
     detail = client.get(f"/orchestration/runs/{run.json()['id']}").json()
     assert detail['run']['vision_used'] is True
     assert image_upload['id'] in detail['run']['image_asset_ids']
+
+
+def test_retry_and_fallback_metadata(monkeypatch):
+    _seed_model_with_vision(monkeypatch)
+    monkeypatch.setattr(OllamaClient, 'chat', _mock_chat_retry_then_ok)
+
+    p = client.post('/projects', json={'name': 'orch-retry-p', 'description': None}).json()
+    c = client.post('/chats', json={'project_id': p['id'], 'title': 'orch-retry-c'}).json()
+    run = client.post('/orchestration/run', json={
+        'project_id': p['id'],
+        'chat_thread_id': c['id'],
+        'content_markdown': 'retry me',
+        'selected_model_names': ['orch-model', 'llava-vision']
+    })
+    assert run.status_code == 200
+    detail = client.get(f"/orchestration/runs/{run.json()['id']}").json()
+    assert any((step.get('retry_count') or 0) >= 1 for step in detail['steps'])
+
+
+def test_approval_pending_approve_reject(monkeypatch):
+    _seed_model(monkeypatch)
+    monkeypatch.setattr(OllamaClient, 'chat', _mock_chat)
+    p = client.post('/projects', json={'name': 'orch-approval-p', 'description': None}).json()
+    c = client.post('/chats', json={'project_id': p['id'], 'title': 'orch-approval-c'}).json()
+
+    run = client.post('/orchestration/run', json={
+        'project_id': p['id'],
+        'chat_thread_id': c['id'],
+        'content_markdown': 'needs approval',
+        'selected_model_names': ['orch-model'],
+        'require_approval_before_publish': True,
+    })
+    assert run.status_code == 200
+    run_id = run.json()['id']
+    detail = client.get(f'/orchestration/runs/{run_id}').json()
+    assert detail['run']['approval_status'] == 'pending'
+    assert detail['run']['pending_final_draft'] is not None
+
+    approve = client.post(f'/orchestration/runs/{run_id}/approve')
+    assert approve.status_code == 200
+    detail2 = client.get(f'/orchestration/runs/{run_id}').json()
+    assert detail2['run']['final_publish_status'] == 'published'
+
+    run2 = client.post('/orchestration/run', json={
+        'project_id': p['id'],
+        'chat_thread_id': c['id'],
+        'content_markdown': 'reject this',
+        'selected_model_names': ['orch-model'],
+        'require_approval_before_publish': True,
+    })
+    run2_id = run2.json()['id']
+    reject = client.post(f'/orchestration/runs/{run2_id}/reject')
+    assert reject.status_code == 200
+    detail3 = client.get(f'/orchestration/runs/{run2_id}').json()
+    assert detail3['run']['approval_status'] == 'rejected'

@@ -8,8 +8,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.models import Asset, ConversationSegment, Message, OrchestrationRun, OrchestrationStep
+from app.models import Asset, ConversationSegment, Message, OrchestrationRun, OrchestrationStep, RoleEnum
 from app.schemas.orchestration import OrchestrationRunCreate, OrchestrationRunDetail, OrchestrationRunOut, OrchestrationStepOut
+from app.services.approval_state import clear_pending, get_pending
 from app.services.ollama_client import OllamaUnavailableError
 from app.services.orchestrator import execute_orchestration
 
@@ -51,6 +52,7 @@ async def run_orchestration(payload: OrchestrationRunCreate, db: Session = Depen
             selected_model_names=payload.selected_model_names,
             orchestrator_model_name=payload.orchestrator_model_name,
             message_asset_ids=payload.message_asset_ids,
+            require_approval_before_publish=payload.require_approval_before_publish,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -114,6 +116,17 @@ def run_detail(run_id: int, db: Session = Depends(get_db)):
         f"images={provenance['image_asset_ids']}, vision_used={provenance['vision_used']}, "
         f"segment={provenance['used_segment_id']}, reviewer={reviewer_decision}, critic_model={provenance['critic_model']}, gpu_enabled={provenance['gpu_enabled']}, generated_artifacts={[a['id'] for a in artifact_summary]}"
     )
+    pending = get_pending(run_id)
+    parallel_groups = {}
+    for step in steps:
+        meta = _extract_meta(step.output_summary)[0]
+        grp = meta.get("step_group")
+        if grp:
+            parallel_groups.setdefault(grp, []).append(step.id)
+    execution_graph_summary = {
+        "parallel_groups": parallel_groups,
+        "step_count": len(steps),
+    }
     return OrchestrationRunDetail(
         run={
             "id": run.id,
@@ -139,6 +152,10 @@ def run_detail(run_id: int, db: Session = Depends(get_db)):
             "gpu_enabled": provenance["gpu_enabled"],
             "critic_model": provenance["critic_model"],
             "critic_summary": provenance["critic_summary"],
+            "approval_status": "pending" if run.status == "approval_pending" else ("rejected" if run.status == "rejected" else "approved"),
+            "pending_final_draft": (pending or {}).get("content_markdown") if pending else None,
+            "execution_graph_summary": execution_graph_summary,
+            "final_publish_status": "published" if run.final_message_id else ("pending" if run.status == "approval_pending" else run.status),
         },
         steps=[
             OrchestrationStepOut(
@@ -157,6 +174,13 @@ def run_detail(run_id: int, db: Session = Depends(get_db)):
                 gpu_enabled=_extract_meta(step.output_summary)[0].get("gpu_enabled"),
                 used_segment_id=_extract_meta(step.output_summary)[0].get("used_segment_id"),
                 parent_segment_summary_used=_extract_meta(step.output_summary)[0].get("parent_segment_summary_used"),
+                step_group=_extract_meta(step.output_summary)[0].get("step_group"),
+                depends_on_step_ids=_extract_meta(step.output_summary)[0].get("depends_on_step_ids", []),
+                execution_mode=_extract_meta(step.output_summary)[0].get("execution_mode"),
+                fallback_model_name=_extract_meta(step.output_summary)[0].get("fallback_model_name"),
+                retry_count=_extract_meta(step.output_summary)[0].get("retry_count", 0),
+                approval_required=_extract_meta(step.output_summary)[0].get("approval_required"),
+                approval_status=_extract_meta(step.output_summary)[0].get("approval_status"),
             )
             for step in steps
         ],
@@ -207,12 +231,63 @@ def stream_run_events(run_id: int, db: Session = Depends(get_db)):
             if step.step_name == "reviewer_critic":
                 start_type = "reviewer_started"
                 done_type = "reviewer_completed"
+            elif step.step_name == "critic_debate":
+                start_type = "critic_started"
+                done_type = "critic_completed"
             elif step.step_name == "final_responder_revision":
                 start_type = "revision_started"
                 done_type = "revision_completed"
+            if meta.get("retry_count", 0):
+                yield f"event: retry_started\ndata: {payload('retry_started', step_id=step.id, step_name=step.step_name, status='retrying', model_name=step.model_name, retry_count=meta.get('retry_count'))}\n\n"
+            if meta.get("fallback_model_name"):
+                yield f"event: fallback_started\ndata: {payload('fallback_started', step_id=step.id, step_name=step.step_name, status='fallback', model_name=step.model_name, fallback_model_name=meta.get('fallback_model_name'))}\n\n"
             yield f"event: {start_type}\ndata: {payload(start_type, step_id=step.id, step_name=step.step_name, status='running', model_name=step.model_name, reviewer_decision=meta.get('reviewer_decision'))}\n\n"
-            yield f"event: {done_type}\ndata: {payload(done_type, step_id=step.id, step_name=step.step_name, status=step.status, model_name=step.model_name, reviewer_decision=meta.get('reviewer_decision'), vision_used=meta.get('vision_used'), image_asset_ids=meta.get('image_asset_ids', []), gpu_enabled=meta.get('gpu_enabled'))}\n\n"
+            yield f"event: {done_type}\ndata: {payload(done_type, step_id=step.id, step_name=step.step_name, assigned_role=step.assigned_role, status=step.status, model_name=step.model_name, reviewer_decision=meta.get('reviewer_decision'), vision_used=meta.get('vision_used'), image_asset_ids=meta.get('image_asset_ids', []), gpu_enabled=meta.get('gpu_enabled'), fallback_model_name=meta.get('fallback_model_name'), retry_count=meta.get('retry_count', 0), approval_status=meta.get('approval_status'))}\n\n"
+        if run.status == "approval_pending":
+            yield f"event: approval_pending\ndata: {payload('approval_pending', run_id=run_id, approval_status='pending')}\n\n"
         end_event = "run_completed" if run.status == "completed" else "run_failed"
+        if run.status == "rejected":
+            end_event = "run_rejected"
         yield f"event: {end_event}\ndata: {payload(end_event, status=run.status, final_message_id=run.final_message_id)}\n\n"
 
     return StreamingResponse(gen(), media_type="text/event-stream")
+
+
+@router.post("/runs/{run_id}/approve")
+def approve_run(run_id: int, db: Session = Depends(get_db)):
+    run = db.get(OrchestrationRun, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="run not found")
+    pending = get_pending(run_id)
+    if not pending:
+        raise HTTPException(status_code=400, detail="no pending approval")
+
+    final_message = Message(
+        project_id=pending["project_id"],
+        chat_thread_id=pending["chat_thread_id"],
+        segment_id=pending["segment_id"],
+        role=RoleEnum.assistant,
+        content_markdown=pending["content_markdown"],
+        plain_text_cache=pending["content_markdown"],
+        sequence_no=pending["sequence_no"],
+        model_name=pending["model_name"],
+        model_role=pending["model_role"],
+    )
+    db.add(final_message)
+    db.flush()
+    run.final_message_id = final_message.id
+    run.status = "completed"
+    db.commit()
+    clear_pending(run_id)
+    return {"ok": True, "run_id": run_id, "final_message_id": final_message.id}
+
+
+@router.post("/runs/{run_id}/reject")
+def reject_run(run_id: int, db: Session = Depends(get_db)):
+    run = db.get(OrchestrationRun, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="run not found")
+    run.status = "rejected"
+    db.commit()
+    clear_pending(run_id)
+    return {"ok": True, "run_id": run_id, "status": "rejected"}
