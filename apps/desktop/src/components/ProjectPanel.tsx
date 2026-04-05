@@ -30,6 +30,17 @@ export function ProjectPanel() {
     }
   });
 
+  const deleteProject = useMutation({
+    mutationFn: (projectId: number) => api.delete<{ ok: boolean }>(`/projects/${projectId}`),
+    onSuccess: () => {
+      setProject(undefined);
+      setChat(undefined);
+      qc.invalidateQueries({ queryKey: ['projects'] });
+      qc.invalidateQueries({ queryKey: ['chats'] });
+      qc.invalidateQueries({ queryKey: ['messages'] });
+    }
+  });
+
   const createChat = useMutation({
     mutationFn: () => api.post<ChatThread>('/chats', { project_id: selectedProjectId, title: chatTitle || 'New Chat' }),
     onSuccess: (chat) => {
@@ -66,16 +77,18 @@ export function ProjectPanel() {
 
       {projectsLoading ? <p>Loading...</p> : projects.length === 0 ? <p>No projects</p> : null}
       {projects.map((p) => (
-        <button
-          key={p.id}
-          style={{ display: 'block', width: '100%', marginBottom: 4, fontSize: 12, background: p.id === selectedProjectId ? '#e8f0ff' : '#fff' }}
-          onClick={() => {
-            setProject(p.id);
-            setChat(undefined);
-          }}
-        >
-          {p.name}
-        </button>
+        <div key={p.id} style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
+          <button
+            style={{ flex: 1, fontSize: 12, background: p.id === selectedProjectId ? '#e8f0ff' : '#fff' }}
+            onClick={() => {
+              setProject(p.id);
+              setChat(undefined);
+            }}
+          >
+            {p.name}
+          </button>
+          <button style={{ fontSize: 11 }} onClick={() => deleteProject.mutate(p.id)}>x</button>
+        </div>
       ))}
 
       <hr style={{ margin: '10px 0' }} />

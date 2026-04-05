@@ -37,3 +37,18 @@ export interface Model {
   enabled: boolean;
   sort_order: number;
 }
+
+export interface OrchestrationRun {
+  id: number;
+  status: string;
+  graph_name: string;
+  started_at: string;
+}
+
+export interface OrchestrationStep {
+  id: number;
+  step_name: string;
+  assigned_role: string;
+  status: string;
+  output_summary?: string | null;
+}

@@ -3,7 +3,9 @@ import { FormEvent, useMemo, useState } from 'react';
 
 import { api } from '../lib/api';
 import { useUiStore } from '../store/uiStore';
-import { Asset, Message } from '../types/domain';
+import { Asset, Message, OrchestrationRun, OrchestrationStep } from '../types/domain';
+
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
 
 export function ChatPanel() {
   const qc = useQueryClient();
@@ -16,6 +18,7 @@ export function ChatPanel() {
   const [message, setMessage] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [sending, setSending] = useState(false);
+  const [selectedRunId, setSelectedRunId] = useState<number | null>(null);
 
   const { data: messages = [], error: messageError } = useQuery({
     queryKey: ['messages', selectedChatId],
@@ -27,6 +30,18 @@ export function ChatPanel() {
     queryKey: ['assets', selectedChatId],
     queryFn: () => api.get<Asset[]>(`/assets/chat/${selectedChatId}`),
     enabled: !!selectedChatId
+  });
+
+  const { data: runs = [] } = useQuery({
+    queryKey: ['orchestration-runs', selectedChatId],
+    queryFn: () => api.get<OrchestrationRun[]>(`/orchestration/runs?chat_thread_id=${selectedChatId}`),
+    enabled: !!selectedChatId && orchestratorOn
+  });
+
+  const { data: runDetail } = useQuery({
+    queryKey: ['orchestration-run-detail', selectedRunId],
+    queryFn: () => api.get<{ run: OrchestrationRun; steps: OrchestrationStep[] }>(`/orchestration/runs/${selectedRunId}`),
+    enabled: !!selectedRunId && orchestratorOn
   });
 
   const uploadMutation = useMutation({
@@ -64,14 +79,18 @@ export function ChatPanel() {
 
   const orchestrateMutation = useMutation({
     mutationFn: (userMessageId: number) =>
-      api.post('/orchestration/run', {
+      api.post<{ id: number }>('/orchestration/run', {
         project_id: selectedProjectId,
         chat_thread_id: selectedChatId,
         user_message_id: userMessageId
-      })
+      }),
+    onSuccess: (run) => {
+      setSelectedRunId(run.id);
+      qc.invalidateQueries({ queryKey: ['orchestration-runs', selectedChatId] });
+    }
   });
 
-  const canSend = !!selectedChatId && !!selectedProjectId && !!message.trim() && (orchestratorOn || selectedModelNames.length > 0);
+  const canSend = !!selectedChatId && !!selectedProjectId && !!message.trim() && selectedModelNames.length > 0;
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -115,17 +134,46 @@ export function ChatPanel() {
       <section style={{ border: '1px solid #eee', borderRadius: 6, padding: 8 }}>
         <div style={{ fontSize: 12, marginBottom: 6 }}>Assets</div>
         {assets.length === 0 ? <small>No uploads</small> : assets.map((a) => (
-          <div key={a.id} style={{ fontSize: 12 }}>
-            <a href={`${import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'}/assets/${a.id}/download`} target="_blank">{a.original_filename}</a>
+          <div key={a.id} style={{ fontSize: 12, marginBottom: 4 }}>
+            <a href={`${API_BASE}/assets/${a.id}/download`} target="_blank">{a.original_filename}</a>
+            {a.mime_type.startsWith('image/') && (
+              <div>
+                <img src={`${API_BASE}/assets/${a.id}/download`} alt={a.original_filename} style={{ maxWidth: 140, maxHeight: 100, marginTop: 4 }} />
+              </div>
+            )}
           </div>
         ))}
       </section>
+
+      {orchestratorOn && (
+        <section style={{ border: '1px solid #eee', borderRadius: 6, padding: 8 }}>
+          <div style={{ fontSize: 12, marginBottom: 4 }}>Orchestration Runs</div>
+          {runs.length === 0 ? <small>No runs</small> : (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {runs.map((r) => (
+                <button key={r.id} onClick={() => setSelectedRunId(r.id)} style={{ fontSize: 11 }}>
+                  #{r.id} {r.status}
+                </button>
+              ))}
+            </div>
+          )}
+          {runDetail?.steps?.length ? (
+            <ul style={{ marginTop: 6, paddingLeft: 16 }}>
+              {runDetail.steps.map((step) => (
+                <li key={step.id} style={{ fontSize: 12 }}>
+                  {step.step_name} / {step.assigned_role} / {step.status}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </section>
+      )}
 
       <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         <textarea value={message} onChange={(e) => setMessage(e.target.value)} rows={4} placeholder="Type message..." style={{ fontSize: 13 }} />
         <input type="file" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <small>{sending ? 'Streaming/processing...' : 'Ready'}</small>
+          <small>{sending ? 'Processing request...' : 'Ready'}</small>
           <button type="submit" disabled={!canSend || sending} style={{ fontSize: 12 }}>Send</button>
         </div>
       </form>

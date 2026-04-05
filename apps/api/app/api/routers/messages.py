@@ -48,6 +48,8 @@ async def execute_message(payload: MessageExecutionRequest, db: Session = Depend
             execution_mode=payload.execution_mode,
             message_asset_ids=payload.message_asset_ids,
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except OllamaUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return MessageExecutionResult(user_message=user, assistant_messages=assistants)

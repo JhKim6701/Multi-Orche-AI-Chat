@@ -3,7 +3,7 @@ from __future__ import annotations
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import Asset, Message, RoleEnum
+from app.models import Asset, Message, ModelRegistry, RoleEnum
 from app.services.ollama_client import OllamaClient
 
 
@@ -16,6 +16,19 @@ async def execute_chat(
     execution_mode: str,
     message_asset_ids: list[int],
 ) -> tuple[Message, list[Message]]:
+    selected_rows = db.scalars(
+        select(ModelRegistry)
+        .where(
+            ModelRegistry.model_name.in_(selected_model_names),
+            ModelRegistry.enabled.is_(True),
+            ModelRegistry.downloaded.is_(True),
+        )
+        .order_by(ModelRegistry.sort_order.asc(), ModelRegistry.model_name.asc())
+    ).all()
+    execution_models = [m.model_name for m in selected_rows]
+    if not execution_models:
+        raise ValueError("실행 가능한 enabled/downloaded 모델이 없습니다. 모델 sync/pull/enable 상태를 확인하세요.")
+
     max_seq = db.scalar(select(func.max(Message.sequence_no)).where(Message.chat_thread_id == chat_thread_id)) or 0
     user_msg = Message(
         project_id=project_id,
@@ -34,18 +47,16 @@ async def execute_chat(
             asset.message_id = user_msg.id
 
     history = db.scalars(select(Message).where(Message.chat_thread_id == chat_thread_id).order_by(Message.sequence_no.asc())).all()
-    context_messages = [{"role": m.role.value if hasattr(m.role, 'value') else str(m.role), "content": m.content_markdown} for m in history]
+    context_messages = [{"role": m.role.value if hasattr(m.role, "value") else str(m.role), "content": m.content_markdown} for m in history]
 
     client = OllamaClient()
     assistant_messages: list[Message] = []
     chain_input = content_markdown
 
-    for idx, model_name in enumerate(selected_model_names):
-        if execution_mode == "independent":
-            query_messages = context_messages + [{"role": "user", "content": content_markdown}]
-        elif execution_mode == "chained":
+    for idx, model_name in enumerate(execution_models):
+        if execution_mode == "chained":
             query_messages = context_messages + [{"role": "user", "content": chain_input}]
-        else:  # ordered
+        else:
             query_messages = context_messages + [{"role": "user", "content": content_markdown}]
 
         response = await client.chat(model_name=model_name, messages=query_messages)

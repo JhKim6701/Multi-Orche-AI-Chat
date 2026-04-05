@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -18,14 +18,36 @@ def run_orchestration(payload: OrchestrationRunCreate, db: Session = Depends(get
 
 @router.get("/runs", response_model=list[OrchestrationRunOut])
 def run_history(chat_thread_id: int, db: Session = Depends(get_db)):
-    return db.scalars(select(OrchestrationRun).where(OrchestrationRun.chat_thread_id == chat_thread_id)).all()
+    return db.scalars(select(OrchestrationRun).where(OrchestrationRun.chat_thread_id == chat_thread_id).order_by(OrchestrationRun.started_at.desc())).all()
 
 
 @router.get("/runs/{run_id}")
 def run_detail(run_id: int, db: Session = Depends(get_db)):
     run = db.get(OrchestrationRun, run_id)
-    steps = db.scalars(select(OrchestrationStep).where(OrchestrationStep.orchestration_run_id == run_id)).all()
-    return {"run": run, "steps": steps}
+    if not run:
+        raise HTTPException(status_code=404, detail="run not found")
+    steps = db.scalars(select(OrchestrationStep).where(OrchestrationStep.orchestration_run_id == run_id).order_by(OrchestrationStep.id.asc())).all()
+    return {
+        "run": {
+            "id": run.id,
+            "status": run.status,
+            "graph_name": run.graph_name,
+            "started_at": run.started_at,
+            "ended_at": run.ended_at,
+        },
+        "steps": [
+            {
+                "id": step.id,
+                "step_name": step.step_name,
+                "assigned_role": step.assigned_role,
+                "model_name": step.model_name,
+                "status": step.status,
+                "input_summary": step.input_summary,
+                "output_summary": step.output_summary,
+            }
+            for step in steps
+        ],
+    }
 
 
 @router.get("/runs/{run_id}/stream")

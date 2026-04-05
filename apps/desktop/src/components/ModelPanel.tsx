@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { api } from '../lib/api';
@@ -19,6 +20,11 @@ export function ModelPanel() {
   const pullMutation = useMutation({ mutationFn: (modelName: string) => api.post('/models/pull', { model_name: modelName }), onSuccess: () => qc.invalidateQueries({ queryKey: ['models'] }) });
   const toggleMutation = useMutation({ mutationFn: ({ id, enabled }: { id: number; enabled: boolean }) => api.patch(`/models/${id}/toggle`, { enabled }), onSuccess: () => qc.invalidateQueries({ queryKey: ['models'] }) });
   const sortMutation = useMutation({ mutationFn: ({ id, sortOrder }: { id: number; sortOrder: number }) => api.patch(`/models/${id}/sort`, { sort_order: sortOrder }), onSuccess: () => qc.invalidateQueries({ queryKey: ['models'] }) });
+
+  const selectedModelsOrdered = useMemo(
+    () => models.filter((m) => selectedModelNames.includes(m.model_name)).sort((a, b) => a.sort_order - b.sort_order),
+    [models, selectedModelNames]
+  );
 
   return (
     <aside style={{ padding: 8, height: '100%', overflow: 'auto', borderLeft: '1px solid #eee' }}>
@@ -54,14 +60,14 @@ export function ModelPanel() {
             <button style={{ fontSize: 11 }} onClick={() => sortMutation.mutate({ id: m.id, sortOrder: m.sort_order - 1 })}>↑</button>
             <button style={{ fontSize: 11 }} onClick={() => sortMutation.mutate({ id: m.id, sortOrder: m.sort_order + 1 })}>↓</button>
           </div>
-          <small>{m.downloaded ? 'downloaded' : 'not downloaded'} / order {m.sort_order}</small>
+          <small>{m.downloaded ? 'downloaded' : 'not downloaded'} / {m.enabled ? 'enabled' : 'disabled'} / order {m.sort_order}</small>
         </div>
       ))}
 
       <hr />
       <div style={{ fontSize: 12 }}>
-        <strong>Selected order</strong>
-        {selectedModelNames.length === 0 ? <div>none</div> : selectedModelNames.map((name, idx) => <div key={name}>{idx + 1}. {name}</div>)}
+        <strong>Execution Order (sort_order)</strong>
+        {selectedModelsOrdered.length === 0 ? <div>none</div> : selectedModelsOrdered.map((m, idx) => <div key={m.id}>{idx + 1}. {m.model_name}</div>)}
       </div>
     </aside>
   );
