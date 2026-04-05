@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.models import ConversationSegment, Message, OrchestrationRun, OrchestrationStep
+from app.models import Asset, ConversationSegment, Message, OrchestrationRun, OrchestrationStep
 from app.schemas.orchestration import OrchestrationRunCreate, OrchestrationRunDetail, OrchestrationRunOut, OrchestrationStepOut
 from app.services.ollama_client import OllamaUnavailableError
 from app.services.orchestrator import execute_orchestration
@@ -86,10 +86,28 @@ def run_detail(run_id: int, db: Session = Depends(get_db)):
         "used_segment_id": reviewer_meta.get("used_segment_id") or (user_msg.segment_id if user_msg else None),
         "parent_segment_summary_used": reviewer_meta.get("parent_segment_summary_used", False),
         "reviewer_decision": reviewer_decision,
+        "image_asset_ids": reviewer_meta.get("image_asset_ids", []),
+        "vision_used": reviewer_meta.get("vision_used", False),
     }
+    generated_artifacts = []
+    if final_message:
+        generated_artifacts = db.scalars(
+            select(Asset).where(Asset.message_id == final_message.id, Asset.source_type == "ai_generated").order_by(Asset.created_at.asc())
+        ).all()
+    artifact_summary = [
+        {
+            "id": a.id,
+            "filename": a.original_filename,
+            "mime_type": a.mime_type,
+            "producing_model": a.producing_model,
+            "producing_role": a.producing_role,
+        }
+        for a in generated_artifacts
+    ]
     final_provenance_summary = (
         f"routing={provenance['routing_reason']}, assets={provenance['used_asset_ids']}, "
-        f"segment={provenance['used_segment_id']}, reviewer={reviewer_decision}"
+        f"images={provenance['image_asset_ids']}, vision_used={provenance['vision_used']}, "
+        f"segment={provenance['used_segment_id']}, reviewer={reviewer_decision}, generated_artifacts={[a['id'] for a in artifact_summary]}"
     )
     return OrchestrationRunDetail(
         run={
@@ -109,6 +127,10 @@ def run_detail(run_id: int, db: Session = Depends(get_db)):
             "used_segment_id": provenance["used_segment_id"],
             "parent_segment_summary_used": provenance["parent_segment_summary_used"],
             "reviewer_decision": reviewer_decision,
+            "generated_artifact_ids": [a["id"] for a in artifact_summary],
+            "artifact_summary": artifact_summary,
+            "vision_used": provenance["vision_used"],
+            "image_asset_ids": provenance["image_asset_ids"],
         },
         steps=[
             OrchestrationStepOut(
@@ -122,6 +144,8 @@ def run_detail(run_id: int, db: Session = Depends(get_db)):
                 routing_reason=_extract_meta(step.output_summary)[0].get("routing_reason"),
                 reviewer_decision=_extract_meta(step.output_summary)[0].get("reviewer_decision"),
                 used_asset_ids=_extract_meta(step.output_summary)[0].get("used_asset_ids", []),
+                image_asset_ids=_extract_meta(step.output_summary)[0].get("image_asset_ids", []),
+                vision_used=_extract_meta(step.output_summary)[0].get("vision_used"),
                 used_segment_id=_extract_meta(step.output_summary)[0].get("used_segment_id"),
                 parent_segment_summary_used=_extract_meta(step.output_summary)[0].get("parent_segment_summary_used"),
             )
@@ -134,6 +158,7 @@ def run_detail(run_id: int, db: Session = Depends(get_db)):
                 "model_name": final_message.model_name,
                 "model_role": final_message.model_role,
                 "final_provenance_summary": final_provenance_summary,
+                "generated_artifact_ids": [a["id"] for a in artifact_summary],
             }
             if final_message
             else None
@@ -177,7 +202,7 @@ def stream_run_events(run_id: int, db: Session = Depends(get_db)):
                 start_type = "revision_started"
                 done_type = "revision_completed"
             yield f"event: {start_type}\ndata: {payload(start_type, step_id=step.id, step_name=step.step_name, status='running', model_name=step.model_name, reviewer_decision=meta.get('reviewer_decision'))}\n\n"
-            yield f"event: {done_type}\ndata: {payload(done_type, step_id=step.id, step_name=step.step_name, status=step.status, model_name=step.model_name, reviewer_decision=meta.get('reviewer_decision'))}\n\n"
+            yield f"event: {done_type}\ndata: {payload(done_type, step_id=step.id, step_name=step.step_name, status=step.status, model_name=step.model_name, reviewer_decision=meta.get('reviewer_decision'), vision_used=meta.get('vision_used'), image_asset_ids=meta.get('image_asset_ids', []))}\n\n"
         end_event = "run_completed" if run.status == "completed" else "run_failed"
         yield f"event: {end_event}\ndata: {payload(end_event, status=run.status, final_message_id=run.final_message_id)}\n\n"
 

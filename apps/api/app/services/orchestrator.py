@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import json
+import base64
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import Asset, ConversationSegment, Message, ModelRegistry, OrchestrationRun, OrchestrationStep, RoleEnum
+from app.services.artifact_manager import create_ai_generated_artifact
 from app.services.asset_ingestion import retrieve_relevant_context
 from app.services.ollama_client import OllamaClient
 from app.services.topic_segmentation import maybe_start_new_segment, update_segment_summary
@@ -71,6 +74,18 @@ def _review_decision(text: str) -> str:
     return "approve"
 
 
+def _encode_image_assets(assets: list[Asset]) -> tuple[list[str], list[int]]:
+    images: list[str] = []
+    image_ids: list[int] = []
+    for asset in assets:
+        if not asset.mime_type.startswith("image/"):
+            continue
+        raw = Path(asset.stored_path).read_bytes()
+        images.append(base64.b64encode(raw).decode("utf-8"))
+        image_ids.append(asset.id)
+    return images, image_ids
+
+
 async def execute_orchestration(
     db: Session,
     project_id: int,
@@ -102,6 +117,7 @@ async def execute_orchestration(
             asset.message_id = user_message.id
 
     has_image = any(a.mime_type.startswith("image/") for a in assets)
+    image_payloads, image_asset_ids = _encode_image_assets(assets)
     context_hits = retrieve_relevant_context(db=db, chat_thread_id=chat_thread_id, query=content_markdown, limit=8)
     context_block = "\n".join([f"asset#{h['asset_id']} {h['filename']}: {h['snippet']}" for h in context_hits])
     needs_reasoning = len(context_block) > 800
@@ -124,6 +140,10 @@ async def execute_orchestration(
         requires_vision=has_image,
         needs_reasoning=needs_reasoning,
     )
+    if has_image and needs_reasoning:
+        routing_reason = f"{routing_reason}+vision_and_reasoning"
+    elif has_image:
+        routing_reason = f"{routing_reason}+vision_priority"
 
     parent_summary = ""
     if segment.parent_segment_id:
@@ -167,6 +187,8 @@ async def execute_orchestration(
                 {
                     "routing_reason": routing_reason,
                     "used_asset_ids": used_asset_ids,
+                    "image_asset_ids": image_asset_ids,
+                    "vision_used": has_image,
                     "used_segment_id": segment.id,
                     "parent_segment_summary_used": parent_summary_used,
                 },
@@ -194,7 +216,13 @@ async def execute_orchestration(
         db.add(final_step)
         db.flush()
 
-        final_resp = await client.chat(model_name=model_name, messages=[{"role": "user", "content": final_prompt}])
+        vision_model = db.scalar(select(ModelRegistry).where(ModelRegistry.model_name == model_name))
+        can_use_vision = bool(vision_model and vision_model.supports_vision)
+        final_resp = await client.chat(
+            model_name=model_name,
+            messages=[{"role": "user", "content": final_prompt}],
+            images=image_payloads if image_payloads and can_use_vision else None,
+        )
         final_text = final_resp.get("message", {}).get("content") or "(empty)"
         if context_hits:
             src = ", ".join(f"#{h['asset_id']}:{h['filename']}" for h in context_hits[:4])
@@ -203,13 +231,15 @@ async def execute_orchestration(
         final_step.status = "completed"
         final_step.output_summary = _pack_summary(
             final_text,
-            {
-                "routing_reason": routing_reason,
-                "used_asset_ids": used_asset_ids,
-                "used_segment_id": segment.id,
-                "parent_segment_summary_used": parent_summary_used,
-            },
-        )
+                {
+                    "routing_reason": routing_reason,
+                    "used_asset_ids": used_asset_ids,
+                    "image_asset_ids": image_asset_ids,
+                    "vision_used": bool(image_payloads and can_use_vision),
+                    "used_segment_id": segment.id,
+                    "parent_segment_summary_used": parent_summary_used,
+                },
+            )
         final_step.ended_at = datetime.utcnow()
 
         review_prompt = (
@@ -237,14 +267,16 @@ async def execute_orchestration(
         reviewer_step.status = "completed"
         reviewer_step.output_summary = _pack_summary(
             review_text,
-            {
-                "routing_reason": routing_reason,
-                "reviewer_decision": reviewer_decision,
-                "used_asset_ids": used_asset_ids,
-                "used_segment_id": segment.id,
-                "parent_segment_summary_used": parent_summary_used,
-            },
-        )
+                {
+                    "routing_reason": routing_reason,
+                    "reviewer_decision": reviewer_decision,
+                    "used_asset_ids": used_asset_ids,
+                    "image_asset_ids": image_asset_ids,
+                    "vision_used": bool(image_payloads and can_use_vision),
+                    "used_segment_id": segment.id,
+                    "parent_segment_summary_used": parent_summary_used,
+                },
+            )
         reviewer_step.ended_at = datetime.utcnow()
 
         revised = False
@@ -282,6 +314,8 @@ async def execute_orchestration(
                     "routing_reason": routing_reason,
                     "reviewer_decision": reviewer_decision,
                     "used_asset_ids": used_asset_ids,
+                    "image_asset_ids": image_asset_ids,
+                    "vision_used": bool(image_payloads and can_use_vision),
                     "used_segment_id": segment.id,
                     "parent_segment_summary_used": parent_summary_used,
                     "revision_applied": True,
@@ -291,7 +325,7 @@ async def execute_orchestration(
 
         provenance_line = (
             f"[Orchestration Provenance] segment={segment.id}, assets={used_asset_ids or []}, "
-            f"routing_reason={routing_reason}, parent_summary_used={parent_summary_used}, "
+            f"images={image_asset_ids or []}, vision_used={bool(image_payloads and can_use_vision)}, routing_reason={routing_reason}, parent_summary_used={parent_summary_used}, "
             f"reviewer_decision={reviewer_decision}, revised={revised}"
         )
         final_text = f"{final_text}\n\n{provenance_line}"
@@ -309,6 +343,20 @@ async def execute_orchestration(
         )
         db.add(final_message)
         db.flush()
+        generated_artifact = create_ai_generated_artifact(
+            db,
+            project_id=project_id,
+            chat_thread_id=chat_thread_id,
+            message_id=final_message.id,
+            content=final_text,
+            model_name=model_name,
+            model_role=final_message.model_role,
+        )
+        final_message.content_markdown = (
+            f"{final_message.content_markdown}\n"
+            f"[Generated artifact] #{generated_artifact.id}:{generated_artifact.original_filename}"
+        )
+        final_message.plain_text_cache = final_message.content_markdown
 
         update_segment_summary(db, segment.id)
         run.final_message_id = final_message.id

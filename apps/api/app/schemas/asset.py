@@ -15,6 +15,8 @@ class AssetOut(BaseModel):
     original_filename: str
     stored_path: str
     derived_metadata_json: dict[str, Any] | None
+    producing_model: str | None
+    producing_role: str | None
     created_at: datetime
 
     class Config:

@@ -36,11 +36,14 @@ export interface Asset {
   id: number;
   chat_thread_id: number;
   message_id?: number | null;
+  source_type?: string;
   original_filename: string;
   mime_type: string;
   stored_path: string;
   created_at: string;
   derived_metadata_json?: { ingest_status?: string; preview?: string; chunk_count?: number } | null;
+  producing_model?: string | null;
+  producing_role?: string | null;
 }
 
 export interface Model {
@@ -62,6 +65,15 @@ export interface OrchestrationRun {
   parent_segment_id?: number;
   divergence_reason?: string;
   current_active_step?: string | null;
+  routing_reason?: string | null;
+  used_asset_ids?: number[];
+  used_segment_id?: number | null;
+  parent_segment_summary_used?: boolean | null;
+  reviewer_decision?: string | null;
+  generated_artifact_ids?: number[];
+  artifact_summary?: Array<{ id: number; filename: string; mime_type?: string; producing_model?: string | null; producing_role?: string | null }>;
+  vision_used?: boolean;
+  image_asset_ids?: number[];
 }
 
 export interface OrchestrationStep {
@@ -75,6 +87,8 @@ export interface OrchestrationStep {
   routing_reason?: string | null;
   reviewer_decision?: string | null;
   used_asset_ids?: number[];
+  image_asset_ids?: number[];
+  vision_used?: boolean | null;
   used_segment_id?: number | null;
   parent_segment_summary_used?: boolean | null;
 }

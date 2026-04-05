@@ -7,7 +7,7 @@ client = TestClient(app)
 
 
 async def _mock_list_models(self):
-    return [{'name': 'model-a'}, {'name': 'model-b'}]
+    return [{'name': 'model-a'}, {'name': 'model-b'}, {'name': 'llava-vision'}]
 
 
 async def _mock_chat(self, model_name: str, messages: list[dict], images=None, options=None):
@@ -102,3 +102,87 @@ def test_execute_message_ollama_unavailable(monkeypatch):
         }
     )
     assert res.status_code == 503
+
+
+def test_image_asset_uses_vision_path(monkeypatch):
+    calls = []
+
+    async def _capture(self, model_name: str, messages: list[dict], images=None, options=None):
+        calls.append({'model': model_name, 'images': images})
+        return {'message': {'content': 'vision-ok'}}
+
+    monkeypatch.setattr(OllamaClient, 'chat', _capture)
+    _setup_models(monkeypatch)
+
+    p = client.post('/projects', json={'name': 'vision-project', 'description': None}).json()
+    c = client.post('/chats', json={'project_id': p['id'], 'title': 'vision-chat'}).json()
+    image_upload = client.post(
+        '/assets/upload',
+        data={'project_id': str(p['id']), 'chat_thread_id': str(c['id']), 'source_type': 'user_upload'},
+        files={'file': ('cat.png', b'fake-image-bytes', 'image/png')},
+    ).json()
+
+    res = client.post('/messages/execute', json={
+        'project_id': p['id'],
+        'chat_thread_id': c['id'],
+        'content_markdown': '이미지 보고 설명해줘',
+        'selected_model_names': ['llava-vision'],
+        'execution_mode': 'independent',
+        'message_asset_ids': [image_upload['id']],
+    })
+    assert res.status_code == 200
+    assert calls and calls[0]['images'] is not None
+    assert '[Generated artifact]' in res.json()['assistant_messages'][0]['content_markdown']
+
+
+def test_non_vision_model_fallback(monkeypatch):
+    calls = []
+
+    async def _capture(self, model_name: str, messages: list[dict], images=None, options=None):
+        calls.append({'model': model_name, 'images': images, 'prompt': messages[-1]['content']})
+        return {'message': {'content': 'text-fallback'}}
+
+    monkeypatch.setattr(OllamaClient, 'chat', _capture)
+    _setup_models(monkeypatch)
+
+    p = client.post('/projects', json={'name': 'fallback-project', 'description': None}).json()
+    c = client.post('/chats', json={'project_id': p['id'], 'title': 'fallback-chat'}).json()
+    image_upload = client.post(
+        '/assets/upload',
+        data={'project_id': str(p['id']), 'chat_thread_id': str(c['id']), 'source_type': 'user_upload'},
+        files={'file': ('cat.png', b'fake-image-bytes', 'image/png')},
+    ).json()
+
+    res = client.post('/messages/execute', json={
+        'project_id': p['id'],
+        'chat_thread_id': c['id'],
+        'content_markdown': '이미지 보고 설명해줘',
+        'selected_model_names': ['model-a'],
+        'execution_mode': 'independent',
+        'message_asset_ids': [image_upload['id']],
+    })
+    assert res.status_code == 200
+    assert calls and calls[0]['images'] is None
+    assert 'Vision fallback' in calls[0]['prompt']
+
+
+def test_ai_generated_artifact_persisted(monkeypatch):
+    monkeypatch.setattr(OllamaClient, 'chat', _mock_chat)
+    _setup_models(monkeypatch)
+
+    p = client.post('/projects', json={'name': 'artifact-project', 'description': None}).json()
+    c = client.post('/chats', json={'project_id': p['id'], 'title': 'artifact-chat'}).json()
+    res = client.post('/messages/execute', json={
+        'project_id': p['id'],
+        'chat_thread_id': c['id'],
+        'content_markdown': 'generate report',
+        'selected_model_names': ['model-a'],
+        'execution_mode': 'independent',
+        'message_asset_ids': [],
+    })
+    assert res.status_code == 200
+    assistant_id = res.json()['assistant_messages'][0]['id']
+    assets = client.get(f"/assets/chat/{c['id']}").json()
+    generated = [a for a in assets if a['source_type'] == 'ai_generated' and a['message_id'] == assistant_id]
+    assert len(generated) >= 1
+    assert generated[0]['producing_model'] == 'model-a'

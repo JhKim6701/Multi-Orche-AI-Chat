@@ -64,6 +64,7 @@ export function ChatPanel() {
   const [selectedRunId, setSelectedRunId] = useState<number | null>(null);
   const [streamPreview, setStreamPreview] = useState('');
   const [showRunDetail, setShowRunDetail] = useState(true);
+  const [showOrchestrationDrawer, setShowOrchestrationDrawer] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('active');
   const [selectedSegmentId, setSelectedSegmentId] = useState<number | null>(null);
   const [divergence, setDivergence] = useState<DetectResponse | null>(null);
@@ -133,7 +134,7 @@ export function ChatPanel() {
 
   const { data: runDetail } = useQuery({
     queryKey: ['orchestration-run-detail', selectedRunId],
-    queryFn: () => api.get<{ run: OrchestrationRun & { final_message_id?: number; segment_id?: number }; steps: OrchestrationStep[]; final_message?: { content_markdown: string; final_provenance_summary?: string } }>(`/orchestration/runs/${selectedRunId}`),
+    queryFn: () => api.get<{ run: OrchestrationRun & { final_message_id?: number; segment_id?: number; generated_artifact_ids?: number[]; artifact_summary?: Array<{ id: number; filename: string; producing_model?: string; producing_role?: string }>; vision_used?: boolean; image_asset_ids?: number[] }; steps: OrchestrationStep[]; final_message?: { content_markdown: string; final_provenance_summary?: string; generated_artifact_ids?: number[] } }>(`/orchestration/runs/${selectedRunId}`),
     enabled: !!selectedRunId && orchestratorOn,
     refetchInterval: orchestratorOn ? 3000 : false,
   });
@@ -280,6 +281,17 @@ export function ChatPanel() {
   const latestAssistant = [...timeline].reverse().find((m) => m.role === 'assistant');
   const usedAssetsLine = latestAssistant?.content_markdown?.split('\n').find((line) => line.includes('[Used assets]'));
   const provenanceLine = latestAssistant?.content_markdown?.split('\n').find((line) => line.includes('[Orchestration Provenance]'));
+  const generatedByMessage = useMemo(() => {
+    const map = new Map<number, Asset[]>();
+    assets.filter((a) => a.source_type === 'ai_generated' && a.message_id).forEach((a) => {
+      const key = a.message_id as number;
+      const prev = map.get(key) ?? [];
+      prev.push(a);
+      map.set(key, prev);
+    });
+    return map;
+  }, [assets]);
+  const visionPending = file?.type?.startsWith('image/') ?? false;
 
   const divergenceLabel = useMemo(() => {
     if (!divergence) return '';
@@ -333,6 +345,18 @@ export function ChatPanel() {
             )}
             <div style={{ fontSize: 11, color: '#666' }}>{m.role} · seg#{m.segment_id ?? '-'} {m.model_name ? `· ${m.model_name}` : ''}</div>
             <div style={{ whiteSpace: 'pre-wrap', fontSize: 13 }}>{m.content_markdown}</div>
+            {m.role === 'assistant' && (generatedByMessage.get(m.id)?.length ?? 0) > 0 && (
+              <div style={{ marginTop: 6, borderTop: '1px dashed #ddd', paddingTop: 6, fontSize: 11 }}>
+                <div>Generated Artifacts</div>
+                {(generatedByMessage.get(m.id) ?? []).map((asset) => (
+                  <div key={asset.id} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <a href={`${API_BASE}/assets/${asset.id}/download`} target="_blank">{asset.original_filename}</a>
+                    <span>model={asset.producing_model ?? '-'}</span>
+                    <span>role={asset.producing_role ?? '-'}</span>
+                  </div>
+                ))}
+              </div>
+            )}
             {m.role === 'user' && (
               <div style={{ marginTop: 6 }}>
                 <button
@@ -389,8 +413,9 @@ export function ChatPanel() {
               <div style={{ fontSize: 12 }}>
                 Routing reason: {runDetail?.run?.routing_reason ?? '-'} · reviewer: {runDetail?.run?.reviewer_decision ?? '-'} · parent summary used: {String(runDetail?.run?.parent_segment_summary_used ?? false)}
               </div>
-              <div style={{ fontSize: 12 }}>Used assets: {(runDetail?.run?.used_asset_ids ?? []).join(', ') || '-'}</div>
-              {runs.map((r) => <button key={r.id} onClick={() => setSelectedRunId(r.id)} style={{ fontSize: 11, marginRight: 4 }}>#{r.id} {r.status}</button>)}
+              <div style={{ fontSize: 12 }}>Used assets: {(runDetail?.run?.used_asset_ids ?? []).join(', ') || '-'} · image assets: {(runDetail?.run?.image_asset_ids ?? []).join(', ') || '-'} · vision used: {String(runDetail?.run?.vision_used ?? false)}</div>
+              {runs.map((r) => <button key={r.id} onClick={() => { setSelectedRunId(r.id); setShowOrchestrationDrawer(true); }} style={{ fontSize: 11, marginRight: 4 }}>#{r.id} {r.status}</button>)}
+              <button type="button" onClick={() => setShowOrchestrationDrawer(true)} style={{ fontSize: 11 }}>Open Visual Panel</button>
               {runDetail?.steps?.length ? (
                 <ol style={{ marginTop: 6, paddingLeft: 18 }}>
                   {runDetail.steps.map((step) => (
@@ -399,7 +424,8 @@ export function ChatPanel() {
                       <div>input: {step.input_summary ?? '-'}</div>
                       <div>output: {step.output_summary ?? '-'}</div>
                       <div>routing_reason: {step.routing_reason ?? '-'} · reviewer_decision: {step.reviewer_decision ?? '-'}</div>
-                      <div>used_asset_ids: {(step.used_asset_ids ?? []).join(', ') || '-'} · used_segment: {step.used_segment_id ?? '-'} · parent_summary_used: {String(step.parent_segment_summary_used ?? false)}</div>
+                      <div>used_asset_ids: {(step.used_asset_ids ?? []).join(', ') || '-'} · image_asset_ids: {(step.image_asset_ids ?? []).join(', ') || '-'} · vision_used: {String(step.vision_used ?? false)}</div>
+                      <div>used_segment: {step.used_segment_id ?? '-'} · parent_summary_used: {String(step.parent_segment_summary_used ?? false)}</div>
                     </li>
                   ))}
                 </ol>
@@ -421,6 +447,7 @@ export function ChatPanel() {
       <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         <textarea value={message} onChange={(e) => setMessage(e.target.value)} rows={4} placeholder="Type message..." style={{ fontSize: 13 }} />
         <input type="file" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+        {visionPending && <small style={{ color: '#0a66c2' }}>Vision badge: 이미지 업로드 감지됨, vision-capable 모델이면 이미지 입력 경로 사용</small>}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6 }}>
           <small>{sending ? 'Processing request...' : `Ready · scope=${queryScope}${queryScope === 'segment' ? `#${selectedSegmentId}` : ''}`}</small>
           <div style={{ display: 'flex', gap: 4 }}>
@@ -443,6 +470,32 @@ export function ChatPanel() {
         </div>
       )}
       {(manualRunMutation.error || orchestrateMutation.error || branchMutation.error || switchSegment.error) && <p style={{ color: 'red' }}>{((manualRunMutation.error || orchestrateMutation.error || branchMutation.error || switchSegment.error) as Error).message}</p>}
+      {showOrchestrationDrawer && (
+        <aside style={{ position: 'fixed', right: 0, top: 0, width: 420, height: '100%', background: '#fff', borderLeft: '1px solid #ddd', padding: 12, overflow: 'auto', boxShadow: '-2px 0 8px rgba(0,0,0,0.08)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <strong>Orchestration Visual Panel</strong>
+            <button onClick={() => setShowOrchestrationDrawer(false)}>Close</button>
+          </div>
+          <div style={{ fontSize: 12, marginTop: 8 }}>run #{selectedRunId ?? '-'} · routing={runDetail?.run?.routing_reason ?? '-'} · reviewer={runDetail?.run?.reviewer_decision ?? '-'}</div>
+          <div style={{ fontSize: 12 }}>vision={String(runDetail?.run?.vision_used ?? false)} · images={(runDetail?.run?.image_asset_ids ?? []).join(', ') || '-'}</div>
+          <div style={{ fontSize: 12 }}>generated artifacts={(runDetail?.run?.generated_artifact_ids ?? []).join(', ') || '-'}</div>
+          <ol style={{ paddingLeft: 18, marginTop: 10 }}>
+            {(runDetail?.steps ?? []).map((step, index) => (
+              <li key={step.id} style={{ marginBottom: 8, background: activeStepId === step.id ? '#fff7d6' : '#f9f9f9', padding: 6, borderRadius: 6 }}>
+                <div>#{index + 1} {step.step_name}</div>
+                <div>role={step.assigned_role} · model={step.model_name ?? '-'}</div>
+                <div>routing={step.routing_reason ?? '-'} · reviewer={step.reviewer_decision ?? '-'}</div>
+                <div>revision={step.step_name.includes('revision') ? 'yes' : 'no'} · used assets={(step.used_asset_ids ?? []).join(', ') || '-'}</div>
+              </li>
+            ))}
+          </ol>
+          {(runDetail?.run?.artifact_summary ?? []).map((a) => (
+            <div key={a.id} style={{ fontSize: 12 }}>
+              artifact#{a.id} {a.filename} ({a.producing_model ?? '-'}/{a.producing_role ?? '-'})
+            </div>
+          ))}
+        </aside>
+      )}
     </main>
   );
 }

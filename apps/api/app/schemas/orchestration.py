@@ -40,6 +40,8 @@ class OrchestrationStepOut(BaseModel):
     routing_reason: str | None = None
     reviewer_decision: str | None = None
     used_asset_ids: list[int] = Field(default_factory=list)
+    image_asset_ids: list[int] = Field(default_factory=list)
+    vision_used: bool | None = None
     used_segment_id: int | None = None
     parent_segment_summary_used: bool | None = None
 

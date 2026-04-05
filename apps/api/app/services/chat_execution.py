@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import base64
+from pathlib import Path
+
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import Asset, ConversationSegment, Message, ModelRegistry, RoleEnum
+from app.services.artifact_manager import create_ai_generated_artifact
 from app.services.asset_ingestion import retrieve_relevant_context
 from app.services.ollama_client import OllamaClient
 from app.services.topic_segmentation import maybe_start_new_segment, update_segment_summary
@@ -16,6 +20,18 @@ def _build_context_block(context_hits: list[dict]) -> str:
     for hit in context_hits:
         lines.append(f"- asset#{hit['asset_id']}({hit['filename']}): {hit['snippet']}")
     return "\n".join(lines)
+
+
+def _encode_image_assets(assets: list[Asset]) -> tuple[list[str], list[int]]:
+    images: list[str] = []
+    image_ids: list[int] = []
+    for asset in assets:
+        if not asset.mime_type.startswith("image/"):
+            continue
+        data = Path(asset.stored_path).read_bytes()
+        images.append(base64.b64encode(data).decode("utf-8"))
+        image_ids.append(asset.id)
+    return images, image_ids
 
 
 async def execute_chat(
@@ -60,6 +76,11 @@ async def execute_chat(
         assets = db.scalars(select(Asset).where(Asset.id.in_(message_asset_ids), Asset.chat_thread_id == chat_thread_id)).all()
         for asset in assets:
             asset.message_id = user_msg.id
+    else:
+        assets = []
+
+    image_payloads, image_asset_ids = _encode_image_assets(assets)
+    has_images = bool(image_asset_ids)
 
     context_hits = retrieve_relevant_context(db=db, chat_thread_id=chat_thread_id, query=content_markdown, limit=6)
     context_block = _build_context_block(context_hits)
@@ -84,15 +105,26 @@ async def execute_chat(
     chain_input = content_markdown
 
     for idx, model_name in enumerate(execution_models):
+        model_row = next((m for m in selected_rows if m.model_name == model_name), None)
+        vision_allowed = bool(model_row and model_row.supports_vision)
         user_content = chain_input if execution_mode == "chained" else content_markdown
         prompt = f"{user_content}\n\n{context_block}" if context_block else user_content
+        if has_images and not vision_allowed:
+            prompt = f"[Vision fallback: selected model has no vision capability]\n{prompt}"
         query_messages = context_messages + [{"role": "user", "content": prompt}]
 
-        response = await client.chat(model_name=model_name, messages=query_messages)
+        response = await client.chat(
+            model_name=model_name,
+            messages=query_messages,
+            images=image_payloads if has_images and vision_allowed else None,
+        )
         answer = response.get("message", {}).get("content") or "(empty response)"
         if context_hits:
             sources = ", ".join(f"#{h['asset_id']}:{h['filename']}" for h in context_hits[:3])
             answer = f"{answer}\n\n[Used assets] {sources}"
+        if has_images:
+            vision_tag = "vision_used" if vision_allowed else "vision_fallback_text_only"
+            answer = f"{answer}\n[Image assets] ids={image_asset_ids} ({vision_tag})"
 
         asst = Message(
             project_id=project_id,
@@ -106,6 +138,18 @@ async def execute_chat(
             model_role="assistant",
         )
         db.add(asst)
+        db.flush()
+        artifact = create_ai_generated_artifact(
+            db,
+            project_id=project_id,
+            chat_thread_id=chat_thread_id,
+            message_id=asst.id,
+            content=answer,
+            model_name=model_name,
+            model_role="assistant",
+        )
+        asst.content_markdown = f"{asst.content_markdown}\n[Generated artifact] #{artifact.id}:{artifact.original_filename}"
+        asst.plain_text_cache = asst.content_markdown
         assistant_messages.append(asst)
         context_messages.append({"role": "assistant", "content": answer})
         if execution_mode == "chained":

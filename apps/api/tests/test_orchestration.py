@@ -10,6 +10,10 @@ async def _mock_list_models(self):
     return [{'name': 'orch-model'}]
 
 
+async def _mock_list_models_with_vision(self):
+    return [{'name': 'orch-model'}, {'name': 'llava-vision'}]
+
+
 async def _mock_chat(self, model_name: str, messages: list[dict], images=None, options=None):
     prompt = messages[-1]["content"]
     if "decision: approve|revise|append_missing_points" in prompt:
@@ -30,6 +34,11 @@ async def _mock_chat_revise(self, model_name: str, messages: list[dict], images=
 
 def _seed_model(monkeypatch):
     monkeypatch.setattr(OllamaClient, 'list_models', _mock_list_models)
+    assert client.post('/models/sync').status_code == 200
+
+
+def _seed_model_with_vision(monkeypatch):
+    monkeypatch.setattr(OllamaClient, 'list_models', _mock_list_models_with_vision)
     assert client.post('/models/sync').status_code == 200
 
 
@@ -151,3 +160,56 @@ def test_orchestration_reviewer_revise_path(monkeypatch):
     assert any(step['step_name'] == 'final_responder_revision' for step in detail['steps'])
     assert detail['final_message']['model_role'] == 'final_responder_revised'
     assert '[Orchestration Provenance]' in detail['final_message']['content_markdown']
+
+
+def test_orchestration_detail_includes_artifact_metadata(monkeypatch):
+    _seed_model(monkeypatch)
+    monkeypatch.setattr(OllamaClient, 'chat', _mock_chat)
+
+    p = client.post('/projects', json={'name': 'orch-artifact-p', 'description': None}).json()
+    c = client.post('/chats', json={'project_id': p['id'], 'title': 'orch-artifact-c'}).json()
+    run = client.post('/orchestration/run', json={
+        'project_id': p['id'],
+        'chat_thread_id': c['id'],
+        'content_markdown': 'create artifact detail',
+        'selected_model_names': ['orch-model']
+    })
+    assert run.status_code == 200
+    detail = client.get(f"/orchestration/runs/{run.json()['id']}").json()
+    assert len(detail['run']['generated_artifact_ids']) >= 1
+    assert isinstance(detail['run']['artifact_summary'], list)
+
+
+def test_orchestration_vision_path_with_image(monkeypatch):
+    calls = []
+
+    async def _capture(self, model_name: str, messages: list[dict], images=None, options=None):
+        calls.append({'model': model_name, 'images': images})
+        prompt = messages[-1]['content']
+        if "decision: approve|revise|append_missing_points" in prompt:
+            return {'message': {'content': 'decision: approve'}}
+        return {'message': {'content': '[vision] ok'}}
+
+    _seed_model_with_vision(monkeypatch)
+    monkeypatch.setattr(OllamaClient, 'chat', _capture)
+
+    p = client.post('/projects', json={'name': 'orch-vision-p', 'description': None}).json()
+    c = client.post('/chats', json={'project_id': p['id'], 'title': 'orch-vision-c'}).json()
+    image_upload = client.post(
+        '/assets/upload',
+        data={'project_id': str(p['id']), 'chat_thread_id': str(c['id']), 'source_type': 'user_upload'},
+        files={'file': ('cat.png', b'fake-image-bytes', 'image/png')},
+    ).json()
+
+    run = client.post('/orchestration/run', json={
+        'project_id': p['id'],
+        'chat_thread_id': c['id'],
+        'content_markdown': 'describe image',
+        'selected_model_names': ['llava-vision'],
+        'message_asset_ids': [image_upload['id']],
+    })
+    assert run.status_code == 200
+    assert any(call['images'] for call in calls)
+    detail = client.get(f"/orchestration/runs/{run.json()['id']}").json()
+    assert detail['run']['vision_used'] is True
+    assert image_upload['id'] in detail['run']['image_asset_ids']
