@@ -68,3 +68,28 @@ def test_orchestration_failure_case(monkeypatch):
         'selected_model_names': ['orch-model']
     })
     assert res.status_code in (500, 503)
+
+
+def test_orchestration_stream_payload_shape(monkeypatch):
+    _seed_model(monkeypatch)
+    monkeypatch.setattr(OllamaClient, 'chat', _mock_chat)
+
+    p = client.post('/projects', json={'name': 'orch-stream-p', 'description': None}).json()
+    c = client.post('/chats', json={'project_id': p['id'], 'title': 'orch-stream-c'}).json()
+    run = client.post('/orchestration/run', json={
+        'project_id': p['id'],
+        'chat_thread_id': c['id'],
+        'content_markdown': 'stream payload check',
+        'selected_model_names': ['orch-model']
+    })
+    assert run.status_code == 200
+    run_id = run.json()['id']
+
+    stream = client.get(f'/orchestration/runs/{run_id}/stream')
+    assert stream.status_code == 200
+    body = stream.text
+    assert 'event: run_started' in body
+    assert 'event_type' in body
+    assert 'segment_id' in body
+    assert 'timestamp' in body
+    assert 'final_message_id' in body

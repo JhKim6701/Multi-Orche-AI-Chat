@@ -14,10 +14,22 @@ export interface Message {
   id: number;
   project_id: number;
   chat_thread_id: number;
+  segment_id?: number | null;
   role: string;
   content_markdown: string;
   model_name?: string | null;
+  model_role?: string | null;
   sequence_no: number;
+}
+
+export interface MessageListResponse {
+  items: Message[];
+  scope_meta: {
+    scope: 'active' | 'segment' | 'all';
+    active_segment_id?: number | null;
+    selected_segment_id?: number | null;
+    segment_boundaries: number[];
+  };
 }
 
 export interface Asset {
@@ -45,6 +57,11 @@ export interface OrchestrationRun {
   graph_name: string;
   started_at: string;
   final_message_id?: number;
+  segment_id?: number;
+  topic_label?: string;
+  parent_segment_id?: number;
+  divergence_reason?: string;
+  current_active_step?: string | null;
 }
 
 export interface OrchestrationStep {

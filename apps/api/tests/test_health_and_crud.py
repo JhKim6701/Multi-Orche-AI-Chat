@@ -25,4 +25,6 @@ def test_project_chat_message_flow():
 
     lst = client.get(f'/messages?chat_thread_id={cid}')
     assert lst.status_code == 200
-    assert len(lst.json()) >= 1
+    payload = lst.json()
+    assert payload['scope_meta']['scope'] == 'active'
+    assert len(payload['items']) >= 1

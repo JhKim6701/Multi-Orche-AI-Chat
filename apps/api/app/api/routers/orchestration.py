@@ -1,3 +1,6 @@
+import json
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
@@ -55,6 +58,7 @@ def run_detail(run_id: int, db: Session = Depends(get_db)):
 
     user_msg = db.get(Message, run.user_message_id)
     seg = db.get(ConversationSegment, user_msg.segment_id) if user_msg and user_msg.segment_id else None
+    active_step = next((step for step in steps if step.status == "running"), None)
     return OrchestrationRunDetail(
         run={
             "id": run.id,
@@ -67,6 +71,7 @@ def run_detail(run_id: int, db: Session = Depends(get_db)):
             "topic_label": seg.topic_label if seg else None,
             "parent_segment_id": seg.parent_segment_id if seg else None,
             "divergence_reason": (user_msg.model_role or '').replace('segment:', '') if user_msg and user_msg.model_role and user_msg.model_role.startswith('segment:') else None,
+            "current_active_step": active_step.step_name if active_step else None,
         },
         steps=[
             OrchestrationStepOut(
@@ -99,16 +104,29 @@ def stream_run_events(run_id: int, db: Session = Depends(get_db)):
     if not run:
         raise HTTPException(status_code=404, detail="run not found")
     steps = db.scalars(select(OrchestrationStep).where(OrchestrationStep.orchestration_run_id == run_id).order_by(OrchestrationStep.id.asc())).all()
+    user_msg = db.get(Message, run.user_message_id)
+    segment_id = user_msg.segment_id if user_msg else None
+
+    def payload(event_type: str, **kwargs):
+        base = {
+            "event_type": event_type,
+            "run_id": run_id,
+            "step_id": None,
+            "step_name": None,
+            "status": run.status,
+            "model_name": None,
+            "segment_id": segment_id,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+        base.update(kwargs)
+        return json.dumps(base, ensure_ascii=False)
 
     def gen():
-        yield f"event: run_started\ndata: {{\"run_id\": {run_id}, \"status\": \"{run.status}\"}}\n\n"
+        yield f"event: run_started\ndata: {payload('run_started', status=run.status)}\n\n"
         for step in steps:
-            yield f"event: step_started\ndata: {{\"step_id\": {step.id}, \"step_name\": \"{step.step_name}\"}}\n\n"
-            yield (
-                "event: step_completed\n"
-                f"data: {{\"step_id\": {step.id}, \"status\": \"{step.status}\", \"role\": \"{step.assigned_role}\", \"model\": \"{step.model_name or ''}\"}}\n\n"
-            )
+            yield f"event: step_started\ndata: {payload('step_started', step_id=step.id, step_name=step.step_name, status='running', model_name=step.model_name)}\n\n"
+            yield f"event: step_completed\ndata: {payload('step_completed', step_id=step.id, step_name=step.step_name, status=step.status, model_name=step.model_name)}\n\n"
         end_event = "run_completed" if run.status == "completed" else "run_failed"
-        yield f"event: {end_event}\ndata: {{\"run_id\": {run_id}, \"status\": \"{run.status}\", \"final_message_id\": {run.final_message_id or 0}}}\n\n"
+        yield f"event: {end_event}\ndata: {payload(end_event, status=run.status, final_message_id=run.final_message_id)}\n\n"
 
     return StreamingResponse(gen(), media_type="text/event-stream")

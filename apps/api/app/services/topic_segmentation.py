@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.models import ConversationSegment, Message
 
 SHIFT_TOKENS = ["다른 질문", "새 주제", "그건 됐고", "이제", "topic change", "switch topic"]
+CONTINUATION_TOKENS = ["계속", "이어", "추가", "더 자세히", "continue", "more", "elaborate", "그럼", "그리고"]
 
 
 def _tokenize(text: str) -> set[str]:
@@ -16,8 +17,13 @@ def _tokenize(text: str) -> set[str]:
 
 def detect_topic_divergence(recent_text: str, new_text: str, segment_summary: str = "") -> tuple[bool, float, str, str]:
     text = new_text.lower().strip()
-    if len(text) < 8:
+    if len(text) < 4:
+        return False, 1.0, "too_short_fallback", "stay"
+    if len(text) < 10:
         return False, 1.0, "short_input_fallback", "stay"
+
+    if any(tok in text for tok in CONTINUATION_TOKENS):
+        return False, 0.8, "continuation_expression_detected", "stay"
 
     if any(tok in text for tok in SHIFT_TOKENS):
         return True, 0.0, "shift_expression_detected", "new_segment"
@@ -32,6 +38,8 @@ def detect_topic_divergence(recent_text: str, new_text: str, segment_summary: st
     summary_overlap = len(summary_tokens & new_tokens) / max(1, len(new_tokens)) if summary_tokens else recent_overlap
     overlap = max(recent_overlap, summary_overlap)
 
+    if overlap < 0.08:
+        return True, overlap, "very_low_overlap_with_segment", "new_segment"
     if overlap < 0.15:
         return True, overlap, "low_overlap_with_segment", "new_segment"
     return False, overlap, "same_topic", "stay"

@@ -62,12 +62,17 @@ def detect_divergence(chat_thread_id: int, new_text: str, db: Session = Depends(
     recent = db.scalars(select(Message).where(Message.segment_id == active.id).order_by(Message.sequence_no.desc()).limit(8)).all()
     recent_text = "\n".join(m.content_markdown for m in reversed(recent))
     diverged, overlap, reason, action = detect_topic_divergence(recent_text, new_text, active.topic_summary or "")
+    trimmed = " ".join(new_text.strip().split())
+    suggested_topic_label = " ".join(trimmed.split()[:5])[:80] if trimmed else active.topic_label
+    if not diverged:
+        suggested_topic_label = active.topic_label
     return {
         "active_segment_id": active.id,
         "diverged": diverged,
         "overlap": overlap,
         "reason": reason,
         "recommended_action": action,
+        "suggested_topic_label": suggested_topic_label or "general",
     }
 
 
@@ -115,7 +120,10 @@ def create_branch(chat_thread_id: int, payload: BranchCreate, db: Session = Depe
     db.refresh(seg)
     return {
         "segment_id": seg.id,
+        "created_segment_id": seg.id,
         "topic_label": seg.topic_label,
         "parent_segment_id": seg.parent_segment_id,
         "branch_from_message_id": seg.branch_from_message_id,
+        "active_switched": True,
+        "active_segment_id": seg.id,
     }

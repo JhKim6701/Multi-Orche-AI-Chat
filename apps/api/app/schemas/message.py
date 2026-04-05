@@ -41,3 +41,15 @@ class MessageExecutionResult(BaseModel):
     used_segment_id: int
     user_message: MessageOut
     assistant_messages: list[MessageOut]
+
+
+class MessageScopeMeta(BaseModel):
+    scope: Literal["active", "segment", "all"]
+    active_segment_id: int | None = None
+    selected_segment_id: int | None = None
+    segment_boundaries: list[int] = Field(default_factory=list)
+
+
+class MessageListResponse(BaseModel):
+    items: list[MessageOut]
+    scope_meta: MessageScopeMeta

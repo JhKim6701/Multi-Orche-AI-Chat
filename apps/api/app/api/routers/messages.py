@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.models import Message, RoleEnum
-from app.schemas.message import MessageCreate, MessageExecutionRequest, MessageExecutionResult, MessageOut
+from app.schemas.message import MessageCreate, MessageExecutionRequest, MessageExecutionResult, MessageListResponse, MessageOut, MessageScopeMeta
 from app.services.chat_execution import execute_chat
 from app.services.ollama_client import OllamaClient, OllamaUnavailableError
 from app.services.topic_segmentation import get_or_create_active_segment
@@ -15,22 +15,42 @@ from app.services.topic_segmentation import get_or_create_active_segment
 router = APIRouter(prefix="/messages", tags=["messages"])
 
 
-@router.get("", response_model=list[MessageOut])
+@router.get("", response_model=MessageListResponse)
 def list_messages(chat_thread_id: int, scope: str = "active", segment_id: int | None = None, db: Session = Depends(get_db)):
+    active = get_or_create_active_segment(db, chat_thread_id)
     q = select(Message).where(Message.chat_thread_id == chat_thread_id)
+    selected_segment_id: int | None = None
     if scope == "active":
-        active = get_or_create_active_segment(db, chat_thread_id)
         q = q.where(Message.segment_id == active.id)
+        selected_segment_id = active.id
     elif scope == "segment":
         if not segment_id:
             raise HTTPException(status_code=400, detail="segment scope requires segment_id")
         q = q.where(Message.segment_id == segment_id)
+        selected_segment_id = segment_id
     elif scope == "all":
         pass
     else:
         raise HTTPException(status_code=400, detail="invalid scope")
 
-    return db.scalars(q.order_by(Message.sequence_no.asc())).all()
+    items = db.scalars(q.order_by(Message.sequence_no.asc())).all()
+    segment_boundaries: list[int] = []
+    if scope == "all":
+        prev_segment_id = None
+        for message in items:
+            if message.segment_id != prev_segment_id:
+                segment_boundaries.append(message.sequence_no)
+                prev_segment_id = message.segment_id
+
+    return MessageListResponse(
+        items=items,
+        scope_meta=MessageScopeMeta(
+            scope=scope,
+            active_segment_id=active.id,
+            selected_segment_id=selected_segment_id,
+            segment_boundaries=segment_boundaries,
+        ),
+    )
 
 
 @router.post("", response_model=MessageOut)
