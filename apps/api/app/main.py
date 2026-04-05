@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routers import assets, chats, messages, models, orchestration, projects, system
+from app.api.routers import assets, chats, messages, models, orchestration, projects, segments, system
 from app.core.config import settings
 from app.db.base import Base
 from app.db.session import engine
@@ -25,4 +25,5 @@ app.include_router(chats.router)
 app.include_router(messages.router)
 app.include_router(models.router)
 app.include_router(assets.router)
+app.include_router(segments.router)
 app.include_router(orchestration.router)

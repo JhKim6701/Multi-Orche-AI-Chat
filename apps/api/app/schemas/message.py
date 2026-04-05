@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 class MessageCreate(BaseModel):
     project_id: int
     chat_thread_id: int
+    segment_id: int | None
     content_markdown: str
 
 
@@ -14,6 +15,7 @@ class MessageOut(BaseModel):
     id: int
     project_id: int
     chat_thread_id: int
+    segment_id: int | None
     role: str
     content_markdown: str
     model_name: str | None
@@ -28,6 +30,7 @@ class MessageOut(BaseModel):
 class MessageExecutionRequest(BaseModel):
     project_id: int
     chat_thread_id: int
+    segment_id: int | None
     content_markdown: str = Field(min_length=1)
     selected_model_names: list[str] = Field(min_length=1)
     execution_mode: Literal["independent", "chained", "ordered"] = "independent"

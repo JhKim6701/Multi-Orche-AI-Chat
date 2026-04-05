@@ -10,6 +10,7 @@ from app.models import Message, RoleEnum
 from app.schemas.message import MessageCreate, MessageExecutionRequest, MessageExecutionResult, MessageOut
 from app.services.chat_execution import execute_chat
 from app.services.ollama_client import OllamaClient, OllamaUnavailableError
+from app.services.topic_segmentation import get_or_create_active_segment
 
 router = APIRouter(prefix="/messages", tags=["messages"])
 
@@ -22,9 +23,11 @@ def list_messages(chat_thread_id: int, db: Session = Depends(get_db)):
 @router.post("", response_model=MessageOut)
 def create_user_message(payload: MessageCreate, db: Session = Depends(get_db)):
     max_seq = db.scalar(select(func.max(Message.sequence_no)).where(Message.chat_thread_id == payload.chat_thread_id)) or 0
+    seg = get_or_create_active_segment(db, payload.chat_thread_id)
     msg = Message(
         project_id=payload.project_id,
         chat_thread_id=payload.chat_thread_id,
+        segment_id=seg.id,
         role=RoleEnum.user,
         content_markdown=payload.content_markdown,
         plain_text_cache=payload.content_markdown,

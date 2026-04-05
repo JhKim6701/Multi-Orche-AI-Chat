@@ -7,6 +7,15 @@ import { Asset, Message, OrchestrationRun, OrchestrationStep } from '../types/do
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
 
+type Segment = {
+  id: number;
+  topic_label: string;
+  topic_summary: string;
+  is_active: boolean;
+  parent_segment_id?: number | null;
+  branch_from_message_id?: number | null;
+};
+
 export function ChatPanel() {
   const qc = useQueryClient();
   const selectedProjectId = useUiStore((s) => s.selectedProjectId);
@@ -22,6 +31,7 @@ export function ChatPanel() {
   const [selectedRunId, setSelectedRunId] = useState<number | null>(null);
   const [streamPreview, setStreamPreview] = useState('');
   const [showRunDetail, setShowRunDetail] = useState(true);
+  const [divergenceHint, setDivergenceHint] = useState<string>('');
 
   const { data: messages = [], error: messageError } = useQuery({
     queryKey: ['messages', selectedChatId],
@@ -35,6 +45,23 @@ export function ChatPanel() {
     enabled: !!selectedChatId
   });
 
+  const { data: segments = [] } = useQuery({
+    queryKey: ['segments', selectedChatId],
+    queryFn: () => api.get<Segment[]>(`/segments?chat_thread_id=${selectedChatId}`),
+    enabled: !!selectedChatId,
+    refetchInterval: 3000,
+  });
+
+  const activeSegment = segments.find((s) => s.is_active);
+
+  const switchSegment = useMutation({
+    mutationFn: (segmentId: number) => api.post('/segments/switch?chat_thread_id=' + selectedChatId, { segment_id: segmentId }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['segments', selectedChatId] });
+      qc.invalidateQueries({ queryKey: ['messages', selectedChatId] });
+    }
+  });
+
   const { data: runs = [] } = useQuery({
     queryKey: ['orchestration-runs', selectedChatId],
     queryFn: () => api.get<OrchestrationRun[]>(`/orchestration/runs?chat_thread_id=${selectedChatId}`),
@@ -44,7 +71,7 @@ export function ChatPanel() {
 
   const { data: runDetail } = useQuery({
     queryKey: ['orchestration-run-detail', selectedRunId],
-    queryFn: () => api.get<{ run: OrchestrationRun & { final_message_id?: number }; steps: OrchestrationStep[]; final_message?: { content_markdown: string } }>(`/orchestration/runs/${selectedRunId}`),
+    queryFn: () => api.get<{ run: OrchestrationRun & { final_message_id?: number; segment_id?: number }; steps: OrchestrationStep[]; final_message?: { content_markdown: string } }>(`/orchestration/runs/${selectedRunId}`),
     enabled: !!selectedRunId && orchestratorOn,
     refetchInterval: orchestratorOn ? 3000 : false,
   });
@@ -80,6 +107,7 @@ export function ChatPanel() {
       setStreamPreview('');
       qc.invalidateQueries({ queryKey: ['messages', selectedChatId] });
       qc.invalidateQueries({ queryKey: ['assets', selectedChatId] });
+      qc.invalidateQueries({ queryKey: ['segments', selectedChatId] });
     }
   });
 
@@ -98,6 +126,7 @@ export function ChatPanel() {
       setSelectedRunId(run.id);
       qc.invalidateQueries({ queryKey: ['orchestration-runs', selectedChatId] });
       qc.invalidateQueries({ queryKey: ['messages', selectedChatId] });
+      qc.invalidateQueries({ queryKey: ['segments', selectedChatId] });
     }
   });
 
@@ -105,17 +134,18 @@ export function ChatPanel() {
 
   const previewStream = async () => {
     if (!selectedChatId || selectedModelNames.length === 0 || !message.trim()) return;
+    const detect = await api.post<{ diverged: boolean; reason: string }>(`/segments/detect?chat_thread_id=${selectedChatId}&new_text=${encodeURIComponent(message)}`);
+    setDivergenceHint(detect.diverged ? `새 주제 감지됨(${detect.reason}) → 새 segment에 자동 분리` : '현재 주제 유지');
+
     const url = new URL(`${API_BASE}/messages/stream`);
     url.searchParams.set('chat_thread_id', String(selectedChatId));
     url.searchParams.set('model_name', selectedModelNames[0]);
     url.searchParams.set('prompt', message);
-
     const res = await fetch(url.toString());
     if (!res.ok || !res.body) {
       setStreamPreview('stream unavailable');
       return;
     }
-
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let text = '';
@@ -136,11 +166,8 @@ export function ChatPanel() {
       if (file) uploaded = await uploadMutation.mutateAsync({ file });
       const assetIds = uploaded ? [uploaded.id] : [];
 
-      if (orchestratorOn) {
-        await orchestrateMutation.mutateAsync(assetIds);
-      } else {
-        await manualRunMutation.mutateAsync(assetIds);
-      }
+      if (orchestratorOn) await orchestrateMutation.mutateAsync(assetIds);
+      else await manualRunMutation.mutateAsync(assetIds);
     } finally {
       setSending(false);
     }
@@ -149,23 +176,36 @@ export function ChatPanel() {
   const timeline = useMemo(() => messages.slice().sort((a, b) => a.sequence_no - b.sequence_no), [messages]);
   const activeStepId = runDetail?.steps?.find((step) => step.status === 'running')?.id;
   const latestAssistant = [...timeline].reverse().find((m) => m.role === 'assistant');
-  const usedAssetsLine = latestAssistant?.content_markdown?.split("\n").find((line) => line.includes("[Used assets]"));
+  const usedAssetsLine = latestAssistant?.content_markdown?.split('\n').find((line) => line.includes('[Used assets]'));
 
   return (
     <main style={{ padding: 10, height: '100%', display: 'flex', flexDirection: 'column', gap: 8 }}>
       <h3 style={{ margin: 0 }}>Chat {orchestratorOn ? '(Orchestrator ON)' : '(Manual Mode)'}</h3>
+      <div style={{ fontSize: 12, background: '#fafafa', padding: 6, border: '1px solid #eee' }}>
+        Active Segment: {activeSegment?.topic_label ?? 'N/A'}
+        {activeSegment?.parent_segment_id ? ` · branched from segment#${activeSegment.parent_segment_id}` : ''}
+        {activeSegment?.branch_from_message_id ? ` · from msg#${activeSegment.branch_from_message_id}` : ''}
+      </div>
+      {!!segments.length && (
+        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+          {segments.map((s) => (
+            <button key={s.id} onClick={() => switchSegment.mutate(s.id)} style={{ fontSize: 11, background: s.is_active ? '#e8f0ff' : '#fff' }}>
+              seg#{s.id} {s.topic_label}
+            </button>
+          ))}
+        </div>
+      )}
       {!selectedChatId && <p style={{ fontSize: 12 }}>Select chat to start.</p>}
       {messageError && <p style={{ color: 'red' }}>Failed to load messages</p>}
 
       <section style={{ flex: 1, overflow: 'auto', border: '1px solid #eee', borderRadius: 6, padding: 8 }}>
         {timeline.length === 0 ? <p style={{ fontSize: 12 }}>No messages yet</p> : null}
-        {timeline.map((m) => (
+        {timeline.map((m, idx) => (
           <div key={m.id} style={{ marginBottom: 8, padding: 8, background: m.role === 'user' ? '#f7fbff' : '#f8f8f8', borderRadius: 6 }}>
-            <div style={{ fontSize: 11, color: '#666' }}>
-              {m.role}
-              {m.model_name ? ` · ${m.model_name}` : ''}
-              {m.role === 'assistant' && m.model_name ? ` (${m.model_name})` : ''}
-            </div>
+            {idx > 0 && timeline[idx - 1].segment_id !== m.segment_id && (
+              <div style={{ fontSize: 11, color: '#8a5' }}>새 주제 시작 (segment #{m.segment_id})</div>
+            )}
+            <div style={{ fontSize: 11, color: '#666' }}>{m.role} · seg#{m.segment_id ?? '-'} {m.model_name ? `· ${m.model_name}` : ''}</div>
             <div style={{ whiteSpace: 'pre-wrap', fontSize: 13 }}>{m.content_markdown}</div>
           </div>
         ))}
@@ -176,56 +216,32 @@ export function ChatPanel() {
         {assets.length === 0 ? <small>No uploads</small> : assets.map((a) => (
           <div key={a.id} style={{ fontSize: 12, marginBottom: 4 }}>
             <a href={`${API_BASE}/assets/${a.id}/download`} target="_blank">{a.original_filename}</a>
-            <small style={{ marginLeft: 6 }}>[{a.derived_metadata_json?.ingest_status ?? "uploaded"}] chunks:{a.derived_metadata_json?.chunk_count ?? 0}</small>
-            {a.mime_type.startsWith('image/') && (
-              <div>
-                <img src={`${API_BASE}/assets/${a.id}/download`} alt={a.original_filename} style={{ maxWidth: 140, maxHeight: 100, marginTop: 4 }} />
-              </div>
-            )}
+            <small style={{ marginLeft: 6 }}>[{a.derived_metadata_json?.ingest_status ?? 'uploaded'}] chunks:{a.derived_metadata_json?.chunk_count ?? 0}</small>
           </div>
         ))}
       </section>
 
-      {usedAssetsLine && (
-        <section style={{ border: '1px solid #eee', borderRadius: 6, padding: 8, fontSize: 12 }}>
-          <strong>Used assets in latest response</strong>
-          <div>{usedAssetsLine}</div>
-        </section>
-      )}
+      {usedAssetsLine && <div style={{ fontSize: 12, border: '1px solid #eee', padding: 6 }}>Used assets: {usedAssetsLine}</div>}
+      {divergenceHint && <div style={{ fontSize: 12, color: '#555' }}>{divergenceHint}</div>}
 
       {orchestratorOn && (
         <section style={{ border: '1px solid #eee', borderRadius: 6, padding: 8 }}>
-          <button onClick={() => setShowRunDetail((v) => !v)} style={{ fontSize: 12 }}>
-            {showRunDetail ? 'Hide' : 'Show'} Orchestration Detail
-          </button>
+          <button onClick={() => setShowRunDetail((v) => !v)} style={{ fontSize: 12 }}>{showRunDetail ? 'Hide' : 'Show'} Orchestration Detail</button>
           {showRunDetail && (
             <>
               <div style={{ fontSize: 12, marginTop: 6 }}>Run Status: {runDetail?.run?.status ?? '-'}</div>
-              {runs.length === 0 ? <small>No runs</small> : (
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                  {runs.map((r) => (
-                    <button key={r.id} onClick={() => setSelectedRunId(r.id)} style={{ fontSize: 11 }}>
-                      #{r.id} {r.status}
-                    </button>
-                  ))}
-                </div>
-              )}
+              <div style={{ fontSize: 12 }}>Run Segment: {runDetail?.run?.segment_id ?? '-'}</div>
+              {runs.map((r) => <button key={r.id} onClick={() => setSelectedRunId(r.id)} style={{ fontSize: 11, marginRight: 4 }}>#{r.id} {r.status}</button>)}
               {runDetail?.steps?.length ? (
                 <ol style={{ marginTop: 6, paddingLeft: 18 }}>
                   {runDetail.steps.map((step) => (
-                    <li key={step.id} style={{ fontSize: 12, marginBottom: 4, background: activeStepId === step.id ? '#fff7d6' : 'transparent' }}>
-                      <div><strong>{step.step_name}</strong> · role={step.assigned_role} · model={step.model_name ?? '-'}</div>
+                    <li key={step.id} style={{ fontSize: 12, background: activeStepId === step.id ? '#fff7d6' : 'transparent' }}>
+                      <div><strong>{step.step_name}</strong> role={step.assigned_role} model={step.model_name ?? '-'}</div>
                       <div>input: {step.input_summary ?? '-'}</div>
                       <div>output: {step.output_summary ?? '-'}</div>
                     </li>
                   ))}
                 </ol>
-              ) : null}
-              {runDetail?.final_message ? (
-                <div style={{ marginTop: 6, padding: 6, background: '#eef8ee', fontSize: 12 }}>
-                  <strong>Final Result</strong>
-                  <div>{runDetail.final_message.content_markdown}</div>
-                </div>
               ) : null}
             </>
           )}
@@ -243,12 +259,8 @@ export function ChatPanel() {
           </div>
         </div>
       </form>
-      {streamPreview && (
-        <pre style={{ margin: 0, maxHeight: 120, overflow: 'auto', fontSize: 11, background: '#f5f5f5', padding: 6 }}>{streamPreview}</pre>
-      )}
-      {(manualRunMutation.error || orchestrateMutation.error) && (
-        <p style={{ color: 'red' }}>{((manualRunMutation.error || orchestrateMutation.error) as Error).message}</p>
-      )}
+      {streamPreview && <pre style={{ margin: 0, maxHeight: 120, overflow: 'auto', fontSize: 11, background: '#f5f5f5', padding: 6 }}>{streamPreview}</pre>}
+      {(manualRunMutation.error || orchestrateMutation.error) && <p style={{ color: 'red' }}>{((manualRunMutation.error || orchestrateMutation.error) as Error).message}</p>}
     </main>
   );
 }

@@ -53,6 +53,7 @@ def run_detail(run_id: int, db: Session = Depends(get_db)):
     steps = db.scalars(select(OrchestrationStep).where(OrchestrationStep.orchestration_run_id == run_id).order_by(OrchestrationStep.id.asc())).all()
     final_message = db.get(Message, run.final_message_id) if run.final_message_id else None
 
+    user_msg = db.get(Message, run.user_message_id)
     return OrchestrationRunDetail(
         run={
             "id": run.id,
@@ -61,6 +62,7 @@ def run_detail(run_id: int, db: Session = Depends(get_db)):
             "started_at": run.started_at,
             "ended_at": run.ended_at,
             "final_message_id": run.final_message_id,
+            "segment_id": user_msg.segment_id if user_msg else None,
         },
         steps=[
             OrchestrationStepOut(

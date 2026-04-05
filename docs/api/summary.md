@@ -41,3 +41,11 @@
 - `GET /orchestration/runs?chat_thread_id={id}`
 - `GET /orchestration/runs/{run_id}` (run metadata + ordered steps + final message)
 - `GET /orchestration/runs/{run_id}/stream`
+
+
+## Segments
+- `GET /segments?chat_thread_id={id}`
+- `GET /segments/{segment_id}`
+- `POST /segments/detect?chat_thread_id={id}&new_text={text}`
+- `POST /segments/switch?chat_thread_id={id}`
+- `POST /segments/branch?chat_thread_id={id}`

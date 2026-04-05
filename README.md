@@ -16,6 +16,7 @@ Ollama 기반 로컬 멀티모델 채팅/오케스트레이션 데스크톱 워�
 - 모델 Sync/Pull/Toggle/Sort (우측 패널과 API 연결)
 - 상단 하드웨어 메트릭 polling
 - 오케스트레이터 ON 시 rule-based orchestration 실행 (planner/context_resolver/model_router/final_responder)
+- topic-aware segmentation: 주제 전환 시 새 segment 자동 분리 + 관련 segment 중심 문맥 스코핑
 
 ## 폴더 구조
 
@@ -66,6 +67,7 @@ npm run dev
 - `POST /assets/upload`, `GET /assets/chat/{chat_id}` (ingest status/preview 포함)
 - `POST /models/sync`, `POST /models/pull`, `PATCH /models/{id}/toggle`, `PATCH /models/{id}/sort`
 - `POST /orchestration/run` (실제 step 실행 + 최종 메시지 저장)
+- `GET /segments?chat_thread_id=...`, `POST /segments/detect`, `POST /segments/switch`, `POST /segments/branch`
 - `GET /orchestration/runs/{id}` (step intermediate + final message 포함)
 - `GET /orchestration/runs/{id}/stream` (run/step 이벤트)
 

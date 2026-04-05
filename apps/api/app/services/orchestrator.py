@@ -6,9 +6,10 @@ from datetime import datetime
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import Asset, Message, ModelRegistry, OrchestrationRun, OrchestrationStep, RoleEnum
+from app.models import Asset, ConversationSegment, Message, ModelRegistry, OrchestrationRun, OrchestrationStep, RoleEnum
 from app.services.asset_ingestion import retrieve_relevant_context
 from app.services.ollama_client import OllamaClient
+from app.services.topic_segmentation import maybe_start_new_segment, update_segment_summary
 
 
 @dataclass
@@ -65,9 +66,11 @@ async def execute_orchestration(
     message_asset_ids: list[int],
 ) -> OrchestrationRun:
     max_seq = db.scalar(select(func.max(Message.sequence_no)).where(Message.chat_thread_id == chat_thread_id)) or 0
+    segment, divergence = maybe_start_new_segment(db, chat_thread_id, content_markdown)
     user_message = Message(
         project_id=project_id,
         chat_thread_id=chat_thread_id,
+        segment_id=segment.id,
         role=RoleEnum.user,
         content_markdown=content_markdown,
         plain_text_cache=content_markdown,
@@ -106,7 +109,12 @@ async def execute_orchestration(
         needs_reasoning=needs_reasoning,
     )
 
-    planner_prompt = f"사용자 요청을 실행 계획으로 요약하라: {content_markdown}"
+    parent_summary = ""
+    if segment.parent_segment_id:
+        parent = db.get(ConversationSegment, segment.parent_segment_id)
+        if parent:
+            parent_summary = parent.topic_summary[:200]
+    planner_prompt = f"segment#{segment.id} topic={segment.topic_label} parent_summary={parent_summary} 사용자 요청 계획: {content_markdown}"
     context_prompt = f"자산 컨텍스트를 요약하라:\n{context_block or '자산 컨텍스트 없음'}"
     router_prompt = f"모델 라우팅 결정: chosen={model_name}, reason={routing_reason}, has_image={has_image}, context_len={len(context_block)}"
 
@@ -173,6 +181,7 @@ async def execute_orchestration(
         final_message = Message(
             project_id=project_id,
             chat_thread_id=chat_thread_id,
+            segment_id=segment.id,
             role=RoleEnum.assistant,
             content_markdown=final_text,
             plain_text_cache=final_text,
@@ -183,6 +192,7 @@ async def execute_orchestration(
         db.add(final_message)
         db.flush()
 
+        update_segment_summary(db, segment.id)
         run.final_message_id = final_message.id
         run.status = "completed"
         run.ended_at = datetime.utcnow()

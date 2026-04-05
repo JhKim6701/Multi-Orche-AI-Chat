@@ -39,11 +39,27 @@ def upgrade() -> None:
         sa.Column("deleted_at", sa.DateTime(), nullable=True),
     )
 
+
+    op.create_table(
+        "conversation_segments",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("chat_thread_id", sa.Integer(), sa.ForeignKey("chat_threads.id"), nullable=False),
+        sa.Column("segment_id", sa.Integer(), sa.ForeignKey("conversation_segments.id"), nullable=True),
+        sa.Column("parent_segment_id", sa.Integer(), sa.ForeignKey("conversation_segments.id"), nullable=True),
+        sa.Column("branch_from_message_id", sa.Integer(), nullable=True),
+        sa.Column("topic_label", sa.String(length=120), nullable=False),
+        sa.Column("topic_summary", sa.Text(), nullable=False),
+        sa.Column("is_active", sa.Boolean(), nullable=False),
+        sa.Column("created_at", sa.DateTime(), nullable=False),
+        sa.Column("updated_at", sa.DateTime(), nullable=False),
+    )
+
     op.create_table(
         "messages",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("project_id", sa.Integer(), sa.ForeignKey("projects.id"), nullable=False),
         sa.Column("chat_thread_id", sa.Integer(), sa.ForeignKey("chat_threads.id"), nullable=False),
+        sa.Column("segment_id", sa.Integer(), sa.ForeignKey("conversation_segments.id"), nullable=True),
         sa.Column("role", roleenum, nullable=False),
         sa.Column("content_markdown", sa.Text(), nullable=False),
         sa.Column("plain_text_cache", sa.Text(), nullable=True),
@@ -58,6 +74,7 @@ def upgrade() -> None:
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("project_id", sa.Integer(), sa.ForeignKey("projects.id"), nullable=False),
         sa.Column("chat_thread_id", sa.Integer(), sa.ForeignKey("chat_threads.id"), nullable=False),
+        sa.Column("segment_id", sa.Integer(), sa.ForeignKey("conversation_segments.id"), nullable=True),
         sa.Column("message_id", sa.Integer(), sa.ForeignKey("messages.id"), nullable=True),
         sa.Column("source_type", sa.String(length=50), nullable=False),
         sa.Column("asset_type", sa.String(length=50), nullable=False),
@@ -77,6 +94,7 @@ def upgrade() -> None:
         sa.Column("asset_id", sa.Integer(), sa.ForeignKey("assets.id"), nullable=False),
         sa.Column("project_id", sa.Integer(), sa.ForeignKey("projects.id"), nullable=False),
         sa.Column("chat_thread_id", sa.Integer(), sa.ForeignKey("chat_threads.id"), nullable=False),
+        sa.Column("segment_id", sa.Integer(), sa.ForeignKey("conversation_segments.id"), nullable=True),
         sa.Column("chunk_index", sa.Integer(), nullable=False),
         sa.Column("content_text", sa.Text(), nullable=False),
         sa.Column("created_at", sa.DateTime(), nullable=False),
@@ -103,6 +121,7 @@ def upgrade() -> None:
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("project_id", sa.Integer(), sa.ForeignKey("projects.id"), nullable=False),
         sa.Column("chat_thread_id", sa.Integer(), sa.ForeignKey("chat_threads.id"), nullable=False),
+        sa.Column("segment_id", sa.Integer(), sa.ForeignKey("conversation_segments.id"), nullable=True),
         sa.Column("user_message_id", sa.Integer(), sa.ForeignKey("messages.id"), nullable=False),
         sa.Column("status", sa.String(length=40), nullable=False),
         sa.Column("graph_name", sa.String(length=100), nullable=False),
@@ -129,6 +148,8 @@ def upgrade() -> None:
     op.create_index("ix_projects_name", "projects", ["name"])
     op.create_index("ix_chat_threads_project_id", "chat_threads", ["project_id"])
     op.create_index("ix_messages_chat_thread_id", "messages", ["chat_thread_id"])
+    op.create_index("ix_messages_segment_id", "messages", ["segment_id"])
+    op.create_index("ix_segments_chat_active", "conversation_segments", ["chat_thread_id", "is_active"])
     op.create_index("ix_messages_chat_sequence", "messages", ["chat_thread_id", "sequence_no"])
     op.create_index("ix_assets_chat_thread_id", "assets", ["chat_thread_id"])
     op.create_index("ix_model_registry_model_name", "model_registry", ["model_name"], unique=True)
@@ -141,6 +162,8 @@ def downgrade() -> None:
     op.drop_index("ix_assets_chat_thread_id", table_name="assets")
     op.drop_index("ix_messages_chat_sequence", table_name="messages")
     op.drop_index("ix_messages_chat_thread_id", table_name="messages")
+    op.drop_index("ix_messages_segment_id", table_name="messages")
+    op.drop_index("ix_segments_chat_active", table_name="conversation_segments")
     op.drop_index("ix_chat_threads_project_id", table_name="chat_threads")
     op.drop_index("ix_projects_name", table_name="projects")
     op.drop_table("orchestration_steps")
@@ -149,6 +172,7 @@ def downgrade() -> None:
     op.drop_table("asset_chunks")
     op.drop_table("assets")
     op.drop_table("messages")
+    op.drop_table("conversation_segments")
     op.drop_table("chat_threads")
     op.drop_table("projects")
     roleenum.drop(op.get_bind(), checkfirst=False)

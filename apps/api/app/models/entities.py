@@ -39,12 +39,27 @@ class ChatThread(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
+class ConversationSegment(Base):
+    __tablename__ = "conversation_segments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    chat_thread_id: Mapped[int] = mapped_column(ForeignKey("chat_threads.id"), index=True)
+    parent_segment_id: Mapped[int | None] = mapped_column(ForeignKey("conversation_segments.id"), nullable=True, index=True)
+    branch_from_message_id: Mapped[int | None] = mapped_column(ForeignKey("messages.id"), nullable=True, index=True)
+    topic_label: Mapped[str] = mapped_column(String(120), default="general")
+    topic_summary: Mapped[str] = mapped_column(Text, default="")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class Message(Base):
     __tablename__ = "messages"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
     chat_thread_id: Mapped[int] = mapped_column(ForeignKey("chat_threads.id"), index=True)
+    segment_id: Mapped[int | None] = mapped_column(ForeignKey("conversation_segments.id"), nullable=True, index=True)
     role: Mapped[RoleEnum] = mapped_column(SAEnum(RoleEnum), index=True)
     content_markdown: Mapped[str] = mapped_column(Text)
     plain_text_cache: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -132,4 +147,5 @@ class OrchestrationStep(Base):
 
 
 Index("ix_messages_chat_sequence", Message.chat_thread_id, Message.sequence_no)
+Index("ix_segments_chat_active", ConversationSegment.chat_thread_id, ConversationSegment.is_active)
 Index("ix_asset_chunks_asset_id", AssetChunk.asset_id)
