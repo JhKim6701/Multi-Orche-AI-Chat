@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.models import Message, OrchestrationRun, OrchestrationStep
+from app.models import ConversationSegment, Message, OrchestrationRun, OrchestrationStep
 from app.schemas.orchestration import OrchestrationRunCreate, OrchestrationRunDetail, OrchestrationRunOut, OrchestrationStepOut
 from app.services.ollama_client import OllamaUnavailableError
 from app.services.orchestrator import execute_orchestration
@@ -54,6 +54,7 @@ def run_detail(run_id: int, db: Session = Depends(get_db)):
     final_message = db.get(Message, run.final_message_id) if run.final_message_id else None
 
     user_msg = db.get(Message, run.user_message_id)
+    seg = db.get(ConversationSegment, user_msg.segment_id) if user_msg and user_msg.segment_id else None
     return OrchestrationRunDetail(
         run={
             "id": run.id,
@@ -63,6 +64,9 @@ def run_detail(run_id: int, db: Session = Depends(get_db)):
             "ended_at": run.ended_at,
             "final_message_id": run.final_message_id,
             "segment_id": user_msg.segment_id if user_msg else None,
+            "topic_label": seg.topic_label if seg else None,
+            "parent_segment_id": seg.parent_segment_id if seg else None,
+            "divergence_reason": (user_msg.model_role or '').replace('segment:', '') if user_msg and user_msg.model_role and user_msg.model_role.startswith('segment:') else None,
         },
         steps=[
             OrchestrationStepOut(

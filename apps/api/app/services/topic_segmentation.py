@@ -11,22 +11,30 @@ SHIFT_TOKENS = ["다른 질문", "새 주제", "그건 됐고", "이제", "topic
 
 
 def _tokenize(text: str) -> set[str]:
-    return {t.lower() for t in text.replace("\n", " ").split() if len(t) > 2}
+    return {t.lower() for t in text.replace("\n", " ").split() if len(t) > 1}
 
 
-def detect_topic_divergence(recent_text: str, new_text: str) -> tuple[bool, float, str]:
-    if any(tok in new_text.lower() for tok in SHIFT_TOKENS):
-        return True, 0.0, "shift_expression_detected"
+def detect_topic_divergence(recent_text: str, new_text: str, segment_summary: str = "") -> tuple[bool, float, str, str]:
+    text = new_text.lower().strip()
+    if len(text) < 8:
+        return False, 1.0, "short_input_fallback", "stay"
+
+    if any(tok in text for tok in SHIFT_TOKENS):
+        return True, 0.0, "shift_expression_detected", "new_segment"
 
     recent_tokens = _tokenize(recent_text)
     new_tokens = _tokenize(new_text)
-    if not recent_tokens or not new_tokens:
-        return False, 1.0, "insufficient_context"
+    summary_tokens = _tokenize(segment_summary)
+    if not new_tokens:
+        return False, 1.0, "insufficient_context", "stay"
 
-    overlap = len(recent_tokens & new_tokens) / max(1, len(new_tokens))
-    if overlap < 0.12:
-        return True, overlap, "low_keyword_overlap"
-    return False, overlap, "same_topic"
+    recent_overlap = len(recent_tokens & new_tokens) / max(1, len(new_tokens)) if recent_tokens else 0.0
+    summary_overlap = len(summary_tokens & new_tokens) / max(1, len(new_tokens)) if summary_tokens else recent_overlap
+    overlap = max(recent_overlap, summary_overlap)
+
+    if overlap < 0.15:
+        return True, overlap, "low_overlap_with_segment", "new_segment"
+    return False, overlap, "same_topic", "stay"
 
 
 def get_or_create_active_segment(db: Session, chat_thread_id: int) -> ConversationSegment:
@@ -50,13 +58,20 @@ def maybe_start_new_segment(db: Session, chat_thread_id: int, new_text: str) -> 
         select(Message)
         .where(Message.chat_thread_id == chat_thread_id, Message.segment_id == active.id)
         .order_by(Message.sequence_no.desc())
-        .limit(6)
+        .limit(8)
     ).all()
     recent_text = "\n".join(m.content_markdown for m in reversed(recent_msgs))
 
-    diverged, score, reason = detect_topic_divergence(recent_text, new_text)
+    diverged, score, reason, action = detect_topic_divergence(recent_text, new_text, active.topic_summary or "")
     if not diverged:
-        return active, {"diverged": False, "overlap": score, "reason": reason, "segment_id": active.id}
+        return active, {
+            "diverged": False,
+            "overlap": score,
+            "reason": reason,
+            "recommended_action": action,
+            "segment_id": active.id,
+            "active_segment_id": active.id,
+        }
 
     active.is_active = False
     topic_label = " ".join(new_text.split()[:5])[:80] or "new-topic"
@@ -72,7 +87,15 @@ def maybe_start_new_segment(db: Session, chat_thread_id: int, new_text: str) -> 
     )
     db.add(seg)
     db.flush()
-    return seg, {"diverged": True, "overlap": score, "reason": reason, "segment_id": seg.id, "parent_segment_id": active.id}
+    return seg, {
+        "diverged": True,
+        "overlap": score,
+        "reason": reason,
+        "recommended_action": action,
+        "segment_id": seg.id,
+        "active_segment_id": active.id,
+        "parent_segment_id": active.id,
+    }
 
 
 def update_segment_summary(db: Session, segment_id: int) -> None:
@@ -83,7 +106,7 @@ def update_segment_summary(db: Session, segment_id: int) -> None:
         select(Message)
         .where(Message.segment_id == segment_id)
         .order_by(Message.sequence_no.asc())
-        .limit(12)
+        .limit(20)
     ).all()
     if msgs:
         merged = " ".join(m.content_markdown for m in msgs)

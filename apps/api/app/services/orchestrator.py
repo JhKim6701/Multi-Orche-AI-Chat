@@ -75,6 +75,7 @@ async def execute_orchestration(
         content_markdown=content_markdown,
         plain_text_cache=content_markdown,
         sequence_no=max_seq + 1,
+        model_role=f"segment:{divergence.get('reason')}" if divergence.get('diverged') else None,
     )
     db.add(user_message)
     db.flush()

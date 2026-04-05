@@ -59,10 +59,16 @@ def segment_detail(segment_id: int, db: Session = Depends(get_db)):
 @router.post("/detect")
 def detect_divergence(chat_thread_id: int, new_text: str, db: Session = Depends(get_db)):
     active = get_or_create_active_segment(db, chat_thread_id)
-    recent = db.scalars(select(Message).where(Message.segment_id == active.id).order_by(Message.sequence_no.desc()).limit(6)).all()
+    recent = db.scalars(select(Message).where(Message.segment_id == active.id).order_by(Message.sequence_no.desc()).limit(8)).all()
     recent_text = "\n".join(m.content_markdown for m in reversed(recent))
-    diverged, overlap, reason = detect_topic_divergence(recent_text, new_text)
-    return {"active_segment_id": active.id, "diverged": diverged, "overlap": overlap, "reason": reason}
+    diverged, overlap, reason, action = detect_topic_divergence(recent_text, new_text, active.topic_summary or "")
+    return {
+        "active_segment_id": active.id,
+        "diverged": diverged,
+        "overlap": overlap,
+        "reason": reason,
+        "recommended_action": action,
+    }
 
 
 @router.post("/switch")
@@ -77,7 +83,15 @@ def switch_segment(chat_thread_id: int, payload: SegmentSwitch, db: Session = De
         raise HTTPException(status_code=404, detail="segment not found")
     target.updated_at = datetime.utcnow()
     db.commit()
-    return {"ok": True, "active_segment_id": target.id}
+    return {
+        "ok": True,
+        "active_segment": {
+            "id": target.id,
+            "topic_label": target.topic_label,
+            "parent_segment_id": target.parent_segment_id,
+            "branch_from_message_id": target.branch_from_message_id,
+        },
+    }
 
 
 @router.post("/branch")
@@ -99,4 +113,9 @@ def create_branch(chat_thread_id: int, payload: BranchCreate, db: Session = Depe
     db.add(seg)
     db.commit()
     db.refresh(seg)
-    return {"segment_id": seg.id, "parent_segment_id": seg.parent_segment_id, "branch_from_message_id": seg.branch_from_message_id}
+    return {
+        "segment_id": seg.id,
+        "topic_label": seg.topic_label,
+        "parent_segment_id": seg.parent_segment_id,
+        "branch_from_message_id": seg.branch_from_message_id,
+    }

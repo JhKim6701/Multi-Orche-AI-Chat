@@ -16,8 +16,21 @@ router = APIRouter(prefix="/messages", tags=["messages"])
 
 
 @router.get("", response_model=list[MessageOut])
-def list_messages(chat_thread_id: int, db: Session = Depends(get_db)):
-    return db.scalars(select(Message).where(Message.chat_thread_id == chat_thread_id).order_by(Message.sequence_no.asc())).all()
+def list_messages(chat_thread_id: int, scope: str = "active", segment_id: int | None = None, db: Session = Depends(get_db)):
+    q = select(Message).where(Message.chat_thread_id == chat_thread_id)
+    if scope == "active":
+        active = get_or_create_active_segment(db, chat_thread_id)
+        q = q.where(Message.segment_id == active.id)
+    elif scope == "segment":
+        if not segment_id:
+            raise HTTPException(status_code=400, detail="segment scope requires segment_id")
+        q = q.where(Message.segment_id == segment_id)
+    elif scope == "all":
+        pass
+    else:
+        raise HTTPException(status_code=400, detail="invalid scope")
+
+    return db.scalars(q.order_by(Message.sequence_no.asc())).all()
 
 
 @router.post("", response_model=MessageOut)
@@ -27,7 +40,7 @@ def create_user_message(payload: MessageCreate, db: Session = Depends(get_db)):
     msg = Message(
         project_id=payload.project_id,
         chat_thread_id=payload.chat_thread_id,
-        segment_id=seg.id,
+        segment_id=payload.segment_id or seg.id,
         role=RoleEnum.user,
         content_markdown=payload.content_markdown,
         plain_text_cache=payload.content_markdown,
@@ -42,7 +55,7 @@ def create_user_message(payload: MessageCreate, db: Session = Depends(get_db)):
 @router.post("/execute", response_model=MessageExecutionResult)
 async def execute_message(payload: MessageExecutionRequest, db: Session = Depends(get_db)):
     try:
-        user, assistants = await execute_chat(
+        used_segment_id, user, assistants = await execute_chat(
             db=db,
             project_id=payload.project_id,
             chat_thread_id=payload.chat_thread_id,
@@ -55,17 +68,28 @@ async def execute_message(payload: MessageExecutionRequest, db: Session = Depend
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except OllamaUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    return MessageExecutionResult(user_message=user, assistant_messages=assistants)
+    return MessageExecutionResult(used_segment_id=used_segment_id, user_message=user, assistant_messages=assistants)
 
 
 @router.get("/stream")
-async def stream_single_model(chat_thread_id: int, model_name: str, prompt: str, db: Session = Depends(get_db)):
+async def stream_single_model(chat_thread_id: int, model_name: str, prompt: str, scope: str = "active", segment_id: int | None = None, db: Session = Depends(get_db)):
     client = OllamaClient()
-    history = db.scalars(select(Message).where(Message.chat_thread_id == chat_thread_id).order_by(Message.sequence_no.asc())).all()
-    stream_messages = [
-        {"role": m.role.value if hasattr(m.role, "value") else str(m.role), "content": m.content_markdown}
-        for m in history[-10:]
-    ] + [{"role": "user", "content": prompt}]
+    q = select(Message).where(Message.chat_thread_id == chat_thread_id)
+    if scope == "active":
+        seg = get_or_create_active_segment(db, chat_thread_id)
+        q = q.where(Message.segment_id == seg.id)
+    elif scope == "segment":
+        if not segment_id:
+            raise HTTPException(status_code=400, detail="segment scope requires segment_id")
+        q = q.where(Message.segment_id == segment_id)
+    elif scope == "all":
+        pass
+    else:
+        raise HTTPException(status_code=400, detail="invalid scope")
+
+    history = db.scalars(q.order_by(Message.sequence_no.asc())).all()
+    stream_messages = [{"role": m.role.value if hasattr(m.role, "value") else str(m.role), "content": m.content_markdown} for m in history[-10:]]
+    stream_messages.append({"role": "user", "content": prompt})
 
     async def gen():
         try:

@@ -26,7 +26,7 @@ async def execute_chat(
     selected_model_names: list[str],
     execution_mode: str,
     message_asset_ids: list[int],
-) -> tuple[Message, list[Message]]:
+) -> tuple[int, Message, list[Message]]:
     selected_rows = db.scalars(
         select(ModelRegistry)
         .where(
@@ -116,4 +116,4 @@ async def execute_chat(
     db.refresh(user_msg)
     for message in assistant_messages:
         db.refresh(message)
-    return user_msg, assistant_messages
+    return segment.id, user_msg, assistant_messages
