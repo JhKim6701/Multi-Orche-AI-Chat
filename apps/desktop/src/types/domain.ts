@@ -72,4 +72,9 @@ export interface OrchestrationStep {
   model_name?: string | null;
   input_summary?: string | null;
   output_summary?: string | null;
+  routing_reason?: string | null;
+  reviewer_decision?: string | null;
+  used_asset_ids?: number[];
+  used_segment_id?: number | null;
+  parent_segment_summary_used?: boolean | null;
 }

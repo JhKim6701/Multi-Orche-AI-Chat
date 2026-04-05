@@ -37,6 +37,11 @@ class OrchestrationStepOut(BaseModel):
     status: str
     input_summary: str | None
     output_summary: str | None
+    routing_reason: str | None = None
+    reviewer_decision: str | None = None
+    used_asset_ids: list[int] = Field(default_factory=list)
+    used_segment_id: int | None = None
+    parent_segment_summary_used: bool | None = None
 
 
 class OrchestrationRunDetail(BaseModel):

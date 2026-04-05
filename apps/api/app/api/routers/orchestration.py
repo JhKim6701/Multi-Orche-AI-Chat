@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -13,6 +14,23 @@ from app.services.ollama_client import OllamaUnavailableError
 from app.services.orchestrator import execute_orchestration
 
 router = APIRouter(prefix="/orchestration", tags=["orchestration"])
+
+
+META_PATTERN = re.compile(r"\[meta\](.*?)\[/meta\]")
+
+
+def _extract_meta(summary: str | None) -> tuple[dict, str | None]:
+    if not summary:
+        return {}, summary
+    match = META_PATTERN.search(summary)
+    if not match:
+        return {}, summary
+    raw = match.group(1)
+    cleaned = summary.replace(match.group(0), "").strip()
+    try:
+        return json.loads(raw), cleaned
+    except json.JSONDecodeError:
+        return {}, cleaned
 
 
 @router.post("/run", response_model=OrchestrationRunOut)
@@ -59,6 +77,20 @@ def run_detail(run_id: int, db: Session = Depends(get_db)):
     user_msg = db.get(Message, run.user_message_id)
     seg = db.get(ConversationSegment, user_msg.segment_id) if user_msg and user_msg.segment_id else None
     active_step = next((step for step in steps if step.status == "running"), None)
+    reviewer_step = next((step for step in steps if step.step_name == "reviewer_critic"), None)
+    reviewer_meta, _ = _extract_meta(reviewer_step.output_summary if reviewer_step else None)
+    reviewer_decision = reviewer_meta.get("reviewer_decision")
+    provenance = {
+        "routing_reason": reviewer_meta.get("routing_reason"),
+        "used_asset_ids": reviewer_meta.get("used_asset_ids", []),
+        "used_segment_id": reviewer_meta.get("used_segment_id") or (user_msg.segment_id if user_msg else None),
+        "parent_segment_summary_used": reviewer_meta.get("parent_segment_summary_used", False),
+        "reviewer_decision": reviewer_decision,
+    }
+    final_provenance_summary = (
+        f"routing={provenance['routing_reason']}, assets={provenance['used_asset_ids']}, "
+        f"segment={provenance['used_segment_id']}, reviewer={reviewer_decision}"
+    )
     return OrchestrationRunDetail(
         run={
             "id": run.id,
@@ -72,6 +104,11 @@ def run_detail(run_id: int, db: Session = Depends(get_db)):
             "parent_segment_id": seg.parent_segment_id if seg else None,
             "divergence_reason": (user_msg.model_role or '').replace('segment:', '') if user_msg and user_msg.model_role and user_msg.model_role.startswith('segment:') else None,
             "current_active_step": active_step.step_name if active_step else None,
+            "routing_reason": provenance["routing_reason"],
+            "used_asset_ids": provenance["used_asset_ids"],
+            "used_segment_id": provenance["used_segment_id"],
+            "parent_segment_summary_used": provenance["parent_segment_summary_used"],
+            "reviewer_decision": reviewer_decision,
         },
         steps=[
             OrchestrationStepOut(
@@ -81,7 +118,12 @@ def run_detail(run_id: int, db: Session = Depends(get_db)):
                 model_name=step.model_name,
                 status=step.status,
                 input_summary=step.input_summary,
-                output_summary=step.output_summary,
+                output_summary=_extract_meta(step.output_summary)[1],
+                routing_reason=_extract_meta(step.output_summary)[0].get("routing_reason"),
+                reviewer_decision=_extract_meta(step.output_summary)[0].get("reviewer_decision"),
+                used_asset_ids=_extract_meta(step.output_summary)[0].get("used_asset_ids", []),
+                used_segment_id=_extract_meta(step.output_summary)[0].get("used_segment_id"),
+                parent_segment_summary_used=_extract_meta(step.output_summary)[0].get("parent_segment_summary_used"),
             )
             for step in steps
         ],
@@ -91,6 +133,7 @@ def run_detail(run_id: int, db: Session = Depends(get_db)):
                 "content_markdown": final_message.content_markdown,
                 "model_name": final_message.model_name,
                 "model_role": final_message.model_role,
+                "final_provenance_summary": final_provenance_summary,
             }
             if final_message
             else None
@@ -124,8 +167,17 @@ def stream_run_events(run_id: int, db: Session = Depends(get_db)):
     def gen():
         yield f"event: run_started\ndata: {payload('run_started', status=run.status)}\n\n"
         for step in steps:
-            yield f"event: step_started\ndata: {payload('step_started', step_id=step.id, step_name=step.step_name, status='running', model_name=step.model_name)}\n\n"
-            yield f"event: step_completed\ndata: {payload('step_completed', step_id=step.id, step_name=step.step_name, status=step.status, model_name=step.model_name)}\n\n"
+            meta, _ = _extract_meta(step.output_summary)
+            start_type = "step_started"
+            done_type = "step_completed"
+            if step.step_name == "reviewer_critic":
+                start_type = "reviewer_started"
+                done_type = "reviewer_completed"
+            elif step.step_name == "final_responder_revision":
+                start_type = "revision_started"
+                done_type = "revision_completed"
+            yield f"event: {start_type}\ndata: {payload(start_type, step_id=step.id, step_name=step.step_name, status='running', model_name=step.model_name, reviewer_decision=meta.get('reviewer_decision'))}\n\n"
+            yield f"event: {done_type}\ndata: {payload(done_type, step_id=step.id, step_name=step.step_name, status=step.status, model_name=step.model_name, reviewer_decision=meta.get('reviewer_decision'))}\n\n"
         end_event = "run_completed" if run.status == "completed" else "run_failed"
         yield f"event: {end_event}\ndata: {payload(end_event, status=run.status, final_message_id=run.final_message_id)}\n\n"
 

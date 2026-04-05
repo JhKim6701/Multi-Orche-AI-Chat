@@ -11,7 +11,21 @@ async def _mock_list_models(self):
 
 
 async def _mock_chat(self, model_name: str, messages: list[dict], images=None, options=None):
-    return {'message': {'content': f'[{model_name}] {messages[-1]["content"][:30]}'}}
+    prompt = messages[-1]["content"]
+    if "decision: approve|revise|append_missing_points" in prompt:
+        return {'message': {'content': 'decision: approve\nLooks good.'}}
+    if "reviewer 피드백을 반영해 최종 답변을 개선하라" in prompt:
+        return {'message': {'content': f'[{model_name}] revised final answer'}}
+    return {'message': {'content': f'[{model_name}] {prompt[:30]}'}}
+
+
+async def _mock_chat_revise(self, model_name: str, messages: list[dict], images=None, options=None):
+    prompt = messages[-1]["content"]
+    if "decision: approve|revise|append_missing_points" in prompt:
+        return {'message': {'content': 'decision: revise\nMissing concrete checklist.'}}
+    if "reviewer 피드백을 반영해 최종 답변을 개선하라" in prompt:
+        return {'message': {'content': f'[{model_name}] revised with checklist'}}
+    return {'message': {'content': f'[{model_name}] {prompt[:30]}'}}
 
 
 def _seed_model(monkeypatch):
@@ -48,6 +62,7 @@ def test_orchestration_run_happy_path(monkeypatch):
     ctx_step = next(step for step in payload['steps'] if step['assigned_role'] == 'context_resolver')
     assert 'asset' in (ctx_step.get('input_summary') or '').lower() or 'asset' in (ctx_step.get('output_summary') or '').lower()
     assert payload['final_message'] is not None
+    assert 'final_provenance_summary' in payload['final_message']
 
 
 def test_orchestration_failure_case(monkeypatch):
@@ -93,3 +108,46 @@ def test_orchestration_stream_payload_shape(monkeypatch):
     assert 'segment_id' in body
     assert 'timestamp' in body
     assert 'final_message_id' in body
+    assert 'reviewer_completed' in body
+
+
+def test_orchestration_reviewer_happy_path(monkeypatch):
+    _seed_model(monkeypatch)
+    monkeypatch.setattr(OllamaClient, 'chat', _mock_chat)
+
+    p = client.post('/projects', json={'name': 'orch-review-ok-p', 'description': None}).json()
+    c = client.post('/chats', json={'project_id': p['id'], 'title': 'orch-review-ok-c'}).json()
+    run = client.post('/orchestration/run', json={
+        'project_id': p['id'],
+        'chat_thread_id': c['id'],
+        'content_markdown': 'review this',
+        'selected_model_names': ['orch-model']
+    })
+    assert run.status_code == 200
+
+    run_id = run.json()['id']
+    detail = client.get(f'/orchestration/runs/{run_id}').json()
+    assert detail['run']['reviewer_decision'] == 'approve'
+    assert any(step['step_name'] == 'reviewer_critic' for step in detail['steps'])
+    assert detail['run']['used_segment_id'] is not None
+
+
+def test_orchestration_reviewer_revise_path(monkeypatch):
+    _seed_model(monkeypatch)
+    monkeypatch.setattr(OllamaClient, 'chat', _mock_chat_revise)
+
+    p = client.post('/projects', json={'name': 'orch-review-revise-p', 'description': None}).json()
+    c = client.post('/chats', json={'project_id': p['id'], 'title': 'orch-review-revise-c'}).json()
+    run = client.post('/orchestration/run', json={
+        'project_id': p['id'],
+        'chat_thread_id': c['id'],
+        'content_markdown': 'please revise',
+        'selected_model_names': ['orch-model']
+    })
+    assert run.status_code == 200
+    run_id = run.json()['id']
+    detail = client.get(f'/orchestration/runs/{run_id}').json()
+    assert detail['run']['reviewer_decision'] == 'revise'
+    assert any(step['step_name'] == 'final_responder_revision' for step in detail['steps'])
+    assert detail['final_message']['model_role'] == 'final_responder_revised'
+    assert '[Orchestration Provenance]' in detail['final_message']['content_markdown']

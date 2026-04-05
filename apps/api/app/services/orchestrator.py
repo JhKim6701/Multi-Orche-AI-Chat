@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -54,6 +55,20 @@ def _choose_model(
 def _summarize(text: str, limit: int = 220) -> str:
     cleaned = " ".join(text.strip().split())
     return cleaned[:limit]
+
+
+def _pack_summary(text: str, meta: dict, limit: int = 700) -> str:
+    payload = f"[meta]{json.dumps(meta, ensure_ascii=False)}[/meta]\n{text}"
+    return _summarize(payload, limit=limit)
+
+
+def _review_decision(text: str) -> str:
+    lowered = text.lower()
+    if "append_missing_points" in lowered:
+        return "append_missing_points"
+    if "revise" in lowered:
+        return "revise"
+    return "approve"
 
 
 async def execute_orchestration(
@@ -127,6 +142,8 @@ async def execute_orchestration(
 
     client = OllamaClient()
     step_outputs: list[str] = []
+    used_asset_ids = [hit["asset_id"] for hit in context_hits]
+    parent_summary_used = bool(parent_summary)
 
     try:
         for index, plan in enumerate(step_plans):
@@ -145,7 +162,15 @@ async def execute_orchestration(
             resp = await client.chat(model_name=model_name, messages=[{"role": "user", "content": plan.prompt}])
             output = resp.get("message", {}).get("content") or "(empty)"
             step.status = "completed"
-            step.output_summary = _summarize(output)
+            step.output_summary = _pack_summary(
+                output,
+                {
+                    "routing_reason": routing_reason,
+                    "used_asset_ids": used_asset_ids,
+                    "used_segment_id": segment.id,
+                    "parent_segment_summary_used": parent_summary_used,
+                },
+            )
             step.ended_at = datetime.utcnow()
             step.retry_count = 0
             step_outputs.append(f"[{index + 1}:{plan.role}] {output}")
@@ -176,8 +201,100 @@ async def execute_orchestration(
             final_text = f"{final_text}\n\n[Used assets] {src}"
 
         final_step.status = "completed"
-        final_step.output_summary = _summarize(final_text)
+        final_step.output_summary = _pack_summary(
+            final_text,
+            {
+                "routing_reason": routing_reason,
+                "used_asset_ids": used_asset_ids,
+                "used_segment_id": segment.id,
+                "parent_segment_summary_used": parent_summary_used,
+            },
+        )
         final_step.ended_at = datetime.utcnow()
+
+        review_prompt = (
+            "너는 reviewer/critic이다. 아래 응답 초안을 검토하고 정확성/누락/구조를 판단하라.\n"
+            "출력 첫 줄은 반드시 decision: approve|revise|append_missing_points 형태로 시작하라.\n"
+            f"user_request: {content_markdown}\n"
+            f"draft_answer: {final_text}\n"
+            f"context: {context_block or '없음'}"
+        )
+        reviewer_step = OrchestrationStep(
+            orchestration_run_id=run.id,
+            step_name="reviewer_critic",
+            assigned_role="reviewer",
+            model_name=model_name,
+            status="running",
+            input_summary=_summarize(review_prompt),
+            started_at=datetime.utcnow(),
+        )
+        db.add(reviewer_step)
+        db.flush()
+
+        review_resp = await client.chat(model_name=model_name, messages=[{"role": "user", "content": review_prompt}])
+        review_text = review_resp.get("message", {}).get("content") or "decision: approve"
+        reviewer_decision = _review_decision(review_text)
+        reviewer_step.status = "completed"
+        reviewer_step.output_summary = _pack_summary(
+            review_text,
+            {
+                "routing_reason": routing_reason,
+                "reviewer_decision": reviewer_decision,
+                "used_asset_ids": used_asset_ids,
+                "used_segment_id": segment.id,
+                "parent_segment_summary_used": parent_summary_used,
+            },
+        )
+        reviewer_step.ended_at = datetime.utcnow()
+
+        revised = False
+        if reviewer_decision in {"revise", "append_missing_points"}:
+            revision_prompt = (
+                "reviewer 피드백을 반영해 최종 답변을 개선하라. 길이는 간결하되 누락점 보강.\n"
+                f"user_request: {content_markdown}\n"
+                f"previous_draft: {final_text}\n"
+                f"reviewer_feedback: {review_text}\n"
+                f"context: {context_block or '없음'}"
+            )
+            revision_step = OrchestrationStep(
+                orchestration_run_id=run.id,
+                step_name="final_responder_revision",
+                assigned_role="final_responder",
+                model_name=model_name,
+                status="running",
+                input_summary=_summarize(revision_prompt),
+                started_at=datetime.utcnow(),
+            )
+            db.add(revision_step)
+            db.flush()
+
+            revision_resp = await client.chat(model_name=model_name, messages=[{"role": "user", "content": revision_prompt}])
+            revised_text = revision_resp.get("message", {}).get("content") or final_text
+            if context_hits:
+                src = ", ".join(f"#{h['asset_id']}:{h['filename']}" for h in context_hits[:4])
+                revised_text = f"{revised_text}\n\n[Used assets] {src}"
+            final_text = revised_text
+            revised = True
+            revision_step.status = "completed"
+            revision_step.output_summary = _pack_summary(
+                revised_text,
+                {
+                    "routing_reason": routing_reason,
+                    "reviewer_decision": reviewer_decision,
+                    "used_asset_ids": used_asset_ids,
+                    "used_segment_id": segment.id,
+                    "parent_segment_summary_used": parent_summary_used,
+                    "revision_applied": True,
+                },
+            )
+            revision_step.ended_at = datetime.utcnow()
+
+        provenance_line = (
+            f"[Orchestration Provenance] segment={segment.id}, assets={used_asset_ids or []}, "
+            f"routing_reason={routing_reason}, parent_summary_used={parent_summary_used}, "
+            f"reviewer_decision={reviewer_decision}, revised={revised}"
+        )
+        final_text = f"{final_text}\n\n{provenance_line}"
 
         final_message = Message(
             project_id=project_id,
@@ -188,7 +305,7 @@ async def execute_orchestration(
             plain_text_cache=final_text,
             sequence_no=max_seq + 2,
             model_name=model_name,
-            model_role="final_responder",
+            model_role="final_responder_revised" if revised else "final_responder",
         )
         db.add(final_message)
         db.flush()

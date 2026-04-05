@@ -46,6 +46,7 @@ type StreamEvent = {
   segment_id: number | null;
   timestamp: string;
   final_message_id?: number | null;
+  reviewer_decision?: string | null;
 };
 
 export function ChatPanel() {
@@ -132,7 +133,7 @@ export function ChatPanel() {
 
   const { data: runDetail } = useQuery({
     queryKey: ['orchestration-run-detail', selectedRunId],
-    queryFn: () => api.get<{ run: OrchestrationRun & { final_message_id?: number; segment_id?: number }; steps: OrchestrationStep[]; final_message?: { content_markdown: string } }>(`/orchestration/runs/${selectedRunId}`),
+    queryFn: () => api.get<{ run: OrchestrationRun & { final_message_id?: number; segment_id?: number }; steps: OrchestrationStep[]; final_message?: { content_markdown: string; final_provenance_summary?: string } }>(`/orchestration/runs/${selectedRunId}`),
     enabled: !!selectedRunId && orchestratorOn,
     refetchInterval: orchestratorOn ? 3000 : false,
   });
@@ -157,6 +158,10 @@ export function ChatPanel() {
     source.addEventListener('run_started', handle);
     source.addEventListener('step_started', handle);
     source.addEventListener('step_completed', handle);
+    source.addEventListener('reviewer_started', handle);
+    source.addEventListener('reviewer_completed', handle);
+    source.addEventListener('revision_started', handle);
+    source.addEventListener('revision_completed', handle);
     source.addEventListener('run_completed', handle);
     source.addEventListener('run_failed', handle);
     source.onerror = () => source.close();
@@ -274,6 +279,7 @@ export function ChatPanel() {
   const activeStepId = runDetail?.steps?.find((step) => step.status === 'running')?.id;
   const latestAssistant = [...timeline].reverse().find((m) => m.role === 'assistant');
   const usedAssetsLine = latestAssistant?.content_markdown?.split('\n').find((line) => line.includes('[Used assets]'));
+  const provenanceLine = latestAssistant?.content_markdown?.split('\n').find((line) => line.includes('[Orchestration Provenance]'));
 
   const divergenceLabel = useMemo(() => {
     if (!divergence) return '';
@@ -380,6 +386,10 @@ export function ChatPanel() {
               <div style={{ fontSize: 12, marginTop: 6 }}>Run Status: {runDetail?.run?.status ?? '-'}</div>
               <div style={{ fontSize: 12 }}>Run Segment: {runDetail?.run?.segment_id ?? '-'} · topic: {runDetail?.run?.topic_label ?? '-'} · parent: {runDetail?.run?.parent_segment_id ?? '-'}</div>
               <div style={{ fontSize: 12 }}>Divergence reason: {runDetail?.run?.divergence_reason ?? '-'} · current step: {runDetail?.run?.current_active_step ?? '-'}</div>
+              <div style={{ fontSize: 12 }}>
+                Routing reason: {runDetail?.run?.routing_reason ?? '-'} · reviewer: {runDetail?.run?.reviewer_decision ?? '-'} · parent summary used: {String(runDetail?.run?.parent_segment_summary_used ?? false)}
+              </div>
+              <div style={{ fontSize: 12 }}>Used assets: {(runDetail?.run?.used_asset_ids ?? []).join(', ') || '-'}</div>
               {runs.map((r) => <button key={r.id} onClick={() => setSelectedRunId(r.id)} style={{ fontSize: 11, marginRight: 4 }}>#{r.id} {r.status}</button>)}
               {runDetail?.steps?.length ? (
                 <ol style={{ marginTop: 6, paddingLeft: 18 }}>
@@ -388,6 +398,8 @@ export function ChatPanel() {
                       <div><strong>{step.step_name}</strong> role={step.assigned_role} model={step.model_name ?? '-'}</div>
                       <div>input: {step.input_summary ?? '-'}</div>
                       <div>output: {step.output_summary ?? '-'}</div>
+                      <div>routing_reason: {step.routing_reason ?? '-'} · reviewer_decision: {step.reviewer_decision ?? '-'}</div>
+                      <div>used_asset_ids: {(step.used_asset_ids ?? []).join(', ') || '-'} · used_segment: {step.used_segment_id ?? '-'} · parent_summary_used: {String(step.parent_segment_summary_used ?? false)}</div>
                     </li>
                   ))}
                 </ol>
@@ -396,7 +408,7 @@ export function ChatPanel() {
                 <div style={{ marginTop: 6, fontSize: 11, borderTop: '1px dashed #ddd', paddingTop: 6 }}>
                   {liveEvents.map((evt, idx) => (
                     <div key={`${evt.timestamp}-${idx}`}>
-                      [{evt.event_type}] step={evt.step_name ?? '-'} status={evt.status} model={evt.model_name ?? '-'} seg#{evt.segment_id ?? '-'}
+                      [{evt.event_type}] step={evt.step_name ?? '-'} status={evt.status} model={evt.model_name ?? '-'} seg#{evt.segment_id ?? '-'} reviewer={evt.reviewer_decision ?? '-'}
                     </div>
                   ))}
                 </div>
@@ -418,6 +430,18 @@ export function ChatPanel() {
         </div>
       </form>
       {streamPreview && <pre style={{ margin: 0, maxHeight: 120, overflow: 'auto', fontSize: 11, background: '#f5f5f5', padding: 6 }}>{streamPreview}</pre>}
+      {orchestratorOn && (
+        <div style={{ fontSize: 11, border: '1px solid #eee', padding: 6 }}>
+          <div>Provenance card</div>
+          <div>run: {selectedRunId ?? '-'} · segment: {runDetail?.run?.used_segment_id ?? runDetail?.run?.segment_id ?? '-'}</div>
+          <div>assets: {(runDetail?.run?.used_asset_ids ?? []).join(', ') || '-'}</div>
+          <div>parent summary used: {String(runDetail?.run?.parent_segment_summary_used ?? false)}</div>
+          <div>review outcome: {runDetail?.run?.reviewer_decision ?? '-'}</div>
+          <div>revised final: {latestAssistant?.model_role === 'final_responder_revised' ? 'yes' : 'no'}</div>
+          {provenanceLine && <div>{provenanceLine}</div>}
+          {runDetail?.final_message?.final_provenance_summary && <div>{runDetail.final_message.final_provenance_summary}</div>}
+        </div>
+      )}
       {(manualRunMutation.error || orchestrateMutation.error || branchMutation.error || switchSegment.error) && <p style={{ color: 'red' }}>{((manualRunMutation.error || orchestrateMutation.error || branchMutation.error || switchSegment.error) as Error).message}</p>}
     </main>
   );
