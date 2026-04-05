@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
     upload_root: str = "./data"
     max_upload_mb: int = 25
+    auto_create_tables: bool = True
 
     model_config = SettingsConfigDict(env_file=".env", env_prefix="MOAC_")
 

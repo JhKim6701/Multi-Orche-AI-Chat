@@ -21,8 +21,18 @@ def create_chat(payload: ChatCreate, db: Session = Depends(get_db)):
 @router.get("", response_model=list[ChatOut])
 def list_chats(project_id: int, db: Session = Depends(get_db)):
     return db.scalars(
-        select(ChatThread).where(ChatThread.project_id == project_id, ChatThread.deleted_at.is_(None)).order_by(ChatThread.updated_at.desc())
+        select(ChatThread)
+        .where(ChatThread.project_id == project_id, ChatThread.deleted_at.is_(None))
+        .order_by(ChatThread.updated_at.desc())
     ).all()
+
+
+@router.get("/{chat_id}", response_model=ChatOut)
+def get_chat(chat_id: int, db: Session = Depends(get_db)):
+    chat = db.get(ChatThread, chat_id)
+    if not chat or chat.deleted_at:
+        raise HTTPException(status_code=404, detail="chat not found")
+    return chat
 
 
 @router.delete("/{chat_id}")

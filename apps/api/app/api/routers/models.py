@@ -1,15 +1,20 @@
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.models import ModelRegistry
 from app.schemas.model import ModelRegistryOut, ModelSortUpdate, ModelToggle
-from app.services.ollama_client import OllamaClient
+from app.services.ollama_client import OllamaClient, OllamaUnavailableError
 
 router = APIRouter(prefix="/models", tags=["models"])
+
+
+class PullRequest(BaseModel):
+    model_name: str
 
 
 @router.get("", response_model=list[ModelRegistryOut])
@@ -17,15 +22,26 @@ def list_registry(db: Session = Depends(get_db)):
     return db.scalars(select(ModelRegistry).order_by(ModelRegistry.sort_order.asc(), ModelRegistry.model_name.asc())).all()
 
 
+@router.get("/enabled", response_model=list[ModelRegistryOut])
+def list_enabled(db: Session = Depends(get_db)):
+    return db.scalars(
+        select(ModelRegistry).where(ModelRegistry.enabled.is_(True), ModelRegistry.downloaded.is_(True)).order_by(ModelRegistry.sort_order.asc())
+    ).all()
+
+
 @router.post("/sync", response_model=list[ModelRegistryOut])
 async def sync_registry(db: Session = Depends(get_db)):
     client = OllamaClient()
-    if not await client.health_check():
-        raise HTTPException(status_code=503, detail="ollama unavailable")
-    remote = await client.list_models()
+    try:
+        remote = await client.list_models()
+    except OllamaUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
     known = {m.model_name: m for m in db.scalars(select(ModelRegistry)).all()}
+    seen: set[str] = set()
     for item in remote:
         name = item["name"]
+        seen.add(name)
         model = known.get(name)
         if not model:
             model = ModelRegistry(model_name=name, downloaded=True, last_seen_at=datetime.utcnow())
@@ -33,17 +49,26 @@ async def sync_registry(db: Session = Depends(get_db)):
         else:
             model.downloaded = True
             model.last_seen_at = datetime.utcnow()
+
+    for model in known.values():
+        if model.model_name not in seen:
+            model.downloaded = False
+
     db.commit()
-    return db.scalars(select(ModelRegistry).order_by(ModelRegistry.sort_order.asc())).all()
+    return db.scalars(select(ModelRegistry).order_by(ModelRegistry.sort_order.asc(), ModelRegistry.model_name.asc())).all()
 
 
-@router.post("/{model_name}/pull")
-async def pull_model(model_name: str, db: Session = Depends(get_db)):
+@router.post("/pull")
+async def pull_model(payload: PullRequest, db: Session = Depends(get_db)):
     client = OllamaClient()
-    await client.pull_model(model_name)
-    model = db.scalar(select(ModelRegistry).where(ModelRegistry.model_name == model_name))
+    try:
+        await client.pull_model(payload.model_name)
+    except OllamaUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    model = db.scalar(select(ModelRegistry).where(ModelRegistry.model_name == payload.model_name))
     if not model:
-        model = ModelRegistry(model_name=model_name, downloaded=True)
+        model = ModelRegistry(model_name=payload.model_name, downloaded=True)
         db.add(model)
     model.downloaded = True
     model.last_seen_at = datetime.utcnow()
@@ -54,7 +79,11 @@ async def pull_model(model_name: str, db: Session = Depends(get_db)):
 @router.delete("/{model_name}")
 async def delete_model(model_name: str, db: Session = Depends(get_db)):
     client = OllamaClient()
-    await client.delete_model(model_name)
+    try:
+        await client.delete_model(model_name)
+    except OllamaUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
     model = db.scalar(select(ModelRegistry).where(ModelRegistry.model_name == model_name))
     if model:
         model.downloaded = False

@@ -9,7 +9,7 @@ export function App() {
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
       <TopBar />
-      <PanelGroup direction="horizontal">
+      <PanelGroup direction="horizontal" autoSaveId="main-layout">
         <Panel defaultSize={20} minSize={15}>
           <ProjectPanel />
         </Panel>

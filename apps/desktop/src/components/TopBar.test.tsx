@@ -3,7 +3,10 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 import { TopBar } from './TopBar';
 
-global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ cpu_percent: 1, memory_percent: 2, disk_percent: 3, gpu_available: false }) }) as any;
+(global as any).fetch = vi.fn().mockResolvedValue({
+  ok: true,
+  json: async () => ({ cpu_percent: 1, memory_percent: 2, disk_percent: 3, gpu_available: false })
+});
 
 test('renders hardware labels', async () => {
   render(
@@ -11,5 +14,6 @@ test('renders hardware labels', async () => {
       <TopBar />
     </QueryClientProvider>
   );
-  expect(await screen.findByText(/CPU/i)).toBeInTheDocument();
+  const label = await screen.findByText(/CPU/i);
+  expect(label).toBeTruthy();
 });

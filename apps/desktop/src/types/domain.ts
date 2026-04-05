@@ -1,0 +1,39 @@
+export interface Project {
+  id: number;
+  name: string;
+  description?: string | null;
+}
+
+export interface ChatThread {
+  id: number;
+  project_id: number;
+  title: string;
+}
+
+export interface Message {
+  id: number;
+  project_id: number;
+  chat_thread_id: number;
+  role: string;
+  content_markdown: string;
+  model_name?: string | null;
+  sequence_no: number;
+}
+
+export interface Asset {
+  id: number;
+  chat_thread_id: number;
+  message_id?: number | null;
+  original_filename: string;
+  mime_type: string;
+  stored_path: string;
+  created_at: string;
+}
+
+export interface Model {
+  id: number;
+  model_name: string;
+  downloaded: boolean;
+  enabled: boolean;
+  sort_order: number;
+}

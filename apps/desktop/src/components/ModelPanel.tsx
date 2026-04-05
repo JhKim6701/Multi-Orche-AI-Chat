@@ -1,25 +1,68 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { getJson } from '../lib/api';
+import { api } from '../lib/api';
 import { useUiStore } from '../store/uiStore';
-
-type Model = { id: number; model_name: string; downloaded: boolean; enabled: boolean };
+import { Model } from '../types/domain';
 
 export function ModelPanel() {
+  const qc = useQueryClient();
   const orchestratorOn = useUiStore((s) => s.orchestratorOn);
-  const toggle = useUiStore((s) => s.toggleOrchestrator);
-  const { data } = useQuery({ queryKey: ['models'], queryFn: () => getJson<Model[]>('/models') });
+  const toggleOrchestrator = useUiStore((s) => s.toggleOrchestrator);
+  const executionMode = useUiStore((s) => s.executionMode);
+  const setExecutionMode = useUiStore((s) => s.setExecutionMode);
+  const selectedModelNames = useUiStore((s) => s.selectedModelNames);
+  const toggleSelectedModel = useUiStore((s) => s.toggleSelectedModel);
+
+  const { data: models = [], isLoading, error } = useQuery({ queryKey: ['models'], queryFn: () => api.get<Model[]>('/models') });
+
+  const syncMutation = useMutation({ mutationFn: () => api.post<Model[]>('/models/sync'), onSuccess: () => qc.invalidateQueries({ queryKey: ['models'] }) });
+  const pullMutation = useMutation({ mutationFn: (modelName: string) => api.post('/models/pull', { model_name: modelName }), onSuccess: () => qc.invalidateQueries({ queryKey: ['models'] }) });
+  const toggleMutation = useMutation({ mutationFn: ({ id, enabled }: { id: number; enabled: boolean }) => api.patch(`/models/${id}/toggle`, { enabled }), onSuccess: () => qc.invalidateQueries({ queryKey: ['models'] }) });
+  const sortMutation = useMutation({ mutationFn: ({ id, sortOrder }: { id: number; sortOrder: number }) => api.patch(`/models/${id}/sort`, { sort_order: sortOrder }), onSuccess: () => qc.invalidateQueries({ queryKey: ['models'] }) });
 
   return (
-    <aside style={{ padding: 8 }}>
-      <h3>Models</h3>
-      <button onClick={toggle}>Orchestrator: {orchestratorOn ? 'ON' : 'OFF'}</button>
-      {(data ?? []).map((m) => (
-        <div key={m.id} style={{ padding: 6, borderBottom: '1px solid #eee' }}>
-          <div>{m.model_name}</div>
-          <small>{m.downloaded ? 'downloaded' : 'not downloaded'} / {m.enabled ? 'enabled' : 'disabled'}</small>
+    <aside style={{ padding: 8, height: '100%', overflow: 'auto', borderLeft: '1px solid #eee' }}>
+      <h3 style={{ margin: '4px 0' }}>Models</h3>
+      <button onClick={() => toggleOrchestrator()} style={{ fontSize: 12, marginBottom: 6 }}>
+        Orchestrator: {orchestratorOn ? 'ON' : 'OFF'}
+      </button>
+
+      <div style={{ marginBottom: 8 }}>
+        <label style={{ fontSize: 12 }}>Execution Mode </label>
+        <select value={executionMode} onChange={(e) => setExecutionMode(e.target.value as any)} style={{ fontSize: 12 }}>
+          <option value="independent">independent</option>
+          <option value="chained">chained</option>
+          <option value="ordered">ordered</option>
+        </select>
+      </div>
+
+      <button onClick={() => syncMutation.mutate()} style={{ fontSize: 12 }}>Sync Ollama</button>
+      {syncMutation.error && <p style={{ color: 'red', fontSize: 12 }}>{(syncMutation.error as Error).message}</p>}
+
+      {isLoading ? <p>Loading models...</p> : null}
+      {error ? <p style={{ color: 'red' }}>Failed to load models</p> : null}
+
+      {models.map((m) => (
+        <div key={m.id} style={{ borderBottom: '1px solid #efefef', padding: '6px 0' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
+            <input type="checkbox" checked={selectedModelNames.includes(m.model_name)} onChange={() => toggleSelectedModel(m.model_name)} />
+            {m.model_name}
+          </label>
+          <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
+            {!m.downloaded && <button style={{ fontSize: 11 }} onClick={() => pullMutation.mutate(m.model_name)}>Download</button>}
+            <button style={{ fontSize: 11 }} onClick={() => toggleMutation.mutate({ id: m.id, enabled: !m.enabled })}>{m.enabled ? 'Disable' : 'Enable'}</button>
+            <button style={{ fontSize: 11 }} onClick={() => sortMutation.mutate({ id: m.id, sortOrder: m.sort_order - 1 })}>↑</button>
+            <button style={{ fontSize: 11 }} onClick={() => sortMutation.mutate({ id: m.id, sortOrder: m.sort_order + 1 })}>↓</button>
+          </div>
+          <small>{m.downloaded ? 'downloaded' : 'not downloaded'} / order {m.sort_order}</small>
         </div>
       ))}
+
+      <hr />
+      <div style={{ fontSize: 12 }}>
+        <strong>Selected order</strong>
+        {selectedModelNames.length === 0 ? <div>none</div> : selectedModelNames.map((name, idx) => <div key={name}>{idx + 1}. {name}</div>)}
+      </div>
     </aside>
   );
 }

@@ -1,10 +1,15 @@
-from fastapi import APIRouter, Depends
+import json
+
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.models import Message, RoleEnum
-from app.schemas.message import MessageCreate, MessageOut
+from app.schemas.message import MessageCreate, MessageExecutionRequest, MessageExecutionResult, MessageOut
+from app.services.chat_execution import execute_chat
+from app.services.ollama_client import OllamaClient, OllamaUnavailableError
 
 router = APIRouter(prefix="/messages", tags=["messages"])
 
@@ -29,3 +34,34 @@ def create_user_message(payload: MessageCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(msg)
     return msg
+
+
+@router.post("/execute", response_model=MessageExecutionResult)
+async def execute_message(payload: MessageExecutionRequest, db: Session = Depends(get_db)):
+    try:
+        user, assistants = await execute_chat(
+            db=db,
+            project_id=payload.project_id,
+            chat_thread_id=payload.chat_thread_id,
+            content_markdown=payload.content_markdown,
+            selected_model_names=payload.selected_model_names,
+            execution_mode=payload.execution_mode,
+            message_asset_ids=payload.message_asset_ids,
+        )
+    except OllamaUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return MessageExecutionResult(user_message=user, assistant_messages=assistants)
+
+
+@router.get("/stream")
+async def stream_single_model(chat_thread_id: int, model_name: str, prompt: str):
+    client = OllamaClient()
+
+    async def gen():
+        try:
+            async for line in client.stream_chat(model_name=model_name, messages=[{"role": "user", "content": prompt}]):
+                yield f"data: {line}\n\n"
+        except OllamaUnavailableError as exc:
+            yield f"event: error\ndata: {json.dumps({'detail': str(exc)})}\n\n"
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
