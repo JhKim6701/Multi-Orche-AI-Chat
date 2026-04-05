@@ -1,323 +1,206 @@
-# multi-orche-ai-chat Codex 전용 초정밀 개발 프롬프트
+# multi-orche-ai-chat Codex 전용 초정밀 통합 프롬프트
 
-## 부제
-Ollama 기반 로컬 멀티모델 오케스트레이션 데스크톱 앱 구현용
-
-## 문서 목적
-이 문서는 `multi-orche-ai-chat` 프로젝트를 실제로 구현시키기 위한 **Codex 전용 초정밀 한국어 프롬프트**입니다.  
-단순 아이디어 정리가 아니라, **저장소 분석 → 설계 고정 → 코드 생성 → 실행 가능한 상태 유지 → 단계별 확장**까지 유도하도록 설계했습니다.
-
----
+이 문서는 **Codex가 `multi-orche-ai-chat`를 처음부터 실제 구현할 수 있도록 설계한 한글 실행 지시서**입니다.  
+목표는 “좋은 제안”이 아니라 **실제 파일 생성·수정·실행·테스트까지 이어지는 구현 지시**입니다.
 
 ## 사용 방법
-이 문서는 Codex/개발형 AI 에이전트에게 그대로 전달할 수 있도록 작성된 한국어 프롬프트입니다.
 
-권장 사용 순서:
-1. 빈 저장소 또는 초기 저장소에 본문 전체를 그대로 입력합니다.
-2. Codex가 저장소를 스캔한 뒤 바로 Milestone 1부터 구현하도록 둡니다.
-3. 중간에 끊겼다면, 마지막 상태를 유지한 채 “현재 저장소 기준으로 계속 구현”이라고 이어서 지시합니다.
-4. 특정 영역만 강화하고 싶으면 후속 제어 프롬프트를 별도로 사용합니다.
+1. 아래 **메인 통합 프롬프트**를 Codex에 첫 입력으로 넣습니다.
+2. 한 번에 너무 많은 작업이 진행되면, 아래 **후속 작업 프롬프트**를 사용해 한 기능씩 이어갑니다.
+3. 이미 생성된 저장소를 다시 정렬하거나 부족한 구현을 바로잡고 싶다면 **보정/재정렬 프롬프트**를 사용합니다.
+4. Codex가 설명만 길게 하고 실제 코드를 덜 만들면, 문서 맨 아래의 **강화 문구**를 프롬프트 맨 앞에 추가합니다.
 
-추천 후속 한 줄 지시 예시:
-- 현재 저장소 기준으로 Milestone 2를 이어서 구현해라.
-- 오케스트레이션 서브시스템만 집중적으로 완성해라.
-- UI/UX 완성도를 높이고 작은 버튼/리사이즈/스크롤 품질을 다듬어라.
-- 테스트와 문서화를 보강해라.
-
----
-
-## 메인 프롬프트
+## 메인 통합 프롬프트
 
 ```text
-당신은 단순 조언자가 아니라 이 저장소의 **주 구현자(Primary Implementer)** 다.
-목표는 아이디어 정리가 아니라, 실제로 실행 가능한 코드를 설계·구현·연결·검증하여 `multi-orche-ai-chat`를 완성하는 것이다.
+너는 조언자가 아니라 이 프로젝트의 주 구현자다.
+설명 위주로 답하지 말고, 현재 저장소 상태를 먼저 분석한 뒤 필요한 파일을 직접 생성·수정해서 기능을 구현하라.
+핵심 경로에서는 의사코드로 멈추지 말고, 실행 가능한 코드로 완성하라.
+작업 중에는 기존 코드를 불필요하게 갈아엎지 말고, 구조를 유지하면서 점진적으로 확장하라.
+각 단계가 끝날 때마다 빌드 가능 상태와 실행 가능 상태를 유지하라.
+애매한 사소한 확인 질문은 하지 말고, 시니어 엔지니어 수준의 합리적 판단으로 진행하라.
+문제가 있으면 우회 가능한 최소 동작 버전을 먼저 만들고, 이후 고도화하라.
 
-중요 원칙:
-- 추상적 브레인스토밍보다 **동작하는 코드와 실행 가능한 구조**를 우선한다.
-- 핵심 경로에서 의사코드로 멈추지 말고 실제 구현을 작성한다.
-- 넓은 범위의 확인 질문은 하지 말고, 진짜 진행 불가한 블로커가 있을 때만 짧게 질문한다.
-- 합리적인 시니어 엔지니어 판단으로 결정하고 전진한다.
-- 각 주요 단계가 끝날 때마다 **빌드 가능한 상태**를 유지한다.
-- 이미 있는 코드가 있으면 먼저 읽고, 불필요한 전면 재작성은 금지한다.
-- 답변은 장황한 설명보다 **결정 요약 + 파일 단위 변경 + 실행 방법** 중심으로 작성한다.
-- 코드 식별자, 파일명, API 경로, DB 컬럼명은 영어로 작성한다.
-- 사용자 노출 문구, README, 운영 문서, UI 텍스트는 한국어를 기본으로 한다.
+프로젝트명:
+multi-orche-ai-chat
 
-======================================================================
-1. 제품 목표
-======================================================================
-
-`multi-orche-ai-chat`는 일반 채팅 앱이 아니라 **로컬 우선(local-first) 멀티모델 AI 오케스트레이션 워크벤치**다.
+제품 정의:
+이 프로젝트는 Ollama 기반 로컬 멀티모델 AI 채팅 및 오케스트레이션 데스크톱 워크벤치다.
+단순 웹 채팅 앱이 아니라, 프로젝트 단위 멀티모달 대화와 다중 AI 모델 제어를 중심으로 하는 로컬 퍼스트 생산성 도구를 구현한다.
 
 핵심 목표:
-1. 사용자가 Ollama를 통해 로컬 AI 모델을 검색/다운로드/선택할 수 있어야 한다.
-2. 프로젝트 단위로 대화와 자료를 관리해야 한다.
-3. 텍스트, 이미지, 일반 파일 업로드를 지원해야 한다.
-4. 업로드 자료와 대화 이력을 기반으로 AI가 답할 수 있어야 한다.
-5. 오케스트레이터 ON 시:
-   - 사용자 요청 분석
-   - 역할 분해
-   - 적절한 모델/에이전트 선택
-   - 실행 순서 및 병렬성 제어
-   - 중간 결과 병합
-   - 재시도/비평/검토
-   - 필요 시 사용자 승인 요청
-   - 최종 응답 생성
-   를 담당해야 한다.
-6. 오케스트레이터 OFF 시:
-   - 사용자가 직접 선택한 여러 모델이 설정된 순서대로 응답해야 한다.
-   - 독립 응답 모드와 체인 응답 모드를 지원해야 한다.
-7. 상단에는 CPU/GPU/Memory/Disk 실시간 상태가 보여야 한다.
-8. UI는 데스크톱 우선 3패널 구조이며, 크기 조절·스크롤·반응형이 적용되어야 한다.
+1. 로컬 PC에서 Ollama 모델을 검색, 다운로드, 선택, 실행할 수 있어야 한다.
+2. 프로젝트별로 대화와 첨부 파일, 생성 결과물을 분리 관리해야 한다.
+3. 텍스트, 이미지, 파일을 함께 다루는 멀티모달 대화를 지원해야 한다.
+4. 오케스트레이터 사용 시 요청을 자동으로 분해하고 역할별 모델을 선택하여 단계적으로 실행해야 한다.
+5. 오케스트레이터 미사용 시 사용자가 선택한 복수 모델이 정해진 순서 또는 체인 규칙에 따라 응답해야 한다.
+6. UI는 데스크톱 퍼스트이며, 작은 버튼, 3패널 레이아웃, 실시간 하드웨어 정보 표시를 갖춰야 한다.
+7. 결과물은 실제로 실행 가능하고 테스트 가능한 수준으로 구현되어야 한다.
 
-======================================================================
-2. 비기능/기술 방향 - 고정
-======================================================================
+절대 지켜야 할 기술 방향:
+- Desktop shell: Tauri v2
+- Frontend: React, TypeScript, Vite, Tailwind CSS, shadcn/ui, Zustand, TanStack Query, react-resizable-panels, react-router
+- Backend: Python 3.12+, FastAPI, LangGraph, Pydantic v2, SQLAlchemy 2.x, Alembic
+- Storage: PostgreSQL, Qdrant, local filesystem
+- Model runtime: host OS에 설치된 Ollama를 기본값으로 사용
+- Dev infra: Docker Compose
+- Tests: pytest, vitest, React Testing Library, Playwright
+- Packaging: Tauri build 기반 로컬 데스크톱 배포
 
-다음 기술 방향을 기본값으로 사용하라. 충돌이나 치명적 제약이 없는 한 바꾸지 마라.
+기본 런타임 전략:
+- Ollama는 기본적으로 호스트 OS에 네이티브 설치된 인스턴스를 사용한다.
+- 앱 계층과 백엔드는 컨테이너화 가능해야 하지만, Ollama까지 기본적으로 컨테이너에 넣지 않는다.
+- 로컬 파일 접근, 하드웨어 모니터링, GPU 사용 토글, 경로 관리가 중요하므로 데스크톱 앱 중심으로 설계한다.
+- 단, 추후 선택적으로 Ollama 컨테이너 모드도 확장 가능하도록 provider abstraction을 설계한다.
 
-데스크톱 셸:
-- Tauri v2
-
-프론트엔드:
-- React
-- TypeScript
-- Vite
-- Tailwind CSS
-- shadcn/ui
-- Zustand
-- TanStack Query
-- react-router
-- react-resizable-panels
-- markdown renderer
-- drag and drop 정렬 UI
-- streaming-friendly chat UI
-
-백엔드:
-- Python 3.12+
-- FastAPI
-- LangGraph
-- Pydantic v2
-- SQLAlchemy
-- Alembic
-
-저장소:
-- PostgreSQL
-- Qdrant
-- 로컬 파일시스템
-
-모델 런타임:
-- Ollama는 기본적으로 **호스트 OS에 네이티브 설치**
-- 앱은 로컬 API를 통해 Ollama와 통신
-- 추후 다른 provider 확장을 고려해 provider adapter 계층을 둔다
-
-개발/운영:
-- Docker Compose로 backend infra 구성
-- Tauri로 desktop packaging
-- 기본 실행 모드는 hybrid:
-  - Ollama = host native
-  - backend = local process 또는 docker compose
-  - desktop app = local backend 연결
-
-======================================================================
-3. 아키텍처 원칙
-======================================================================
-
-반드시 다음 원칙을 따른다.
-
-1. 모놀리식 난개발 금지
-   - UI, API, orchestration, asset pipeline, retrieval, model registry, hardware monitor를 분리한다.
-
-2. 확장 가능한 추상화 유지
-   - Ollama 전용 하드코딩을 최소화하고 provider adapter 형태로 감싼다.
-
-3. 실행 경로 우선
-   - 설계 문서보다 먼저 최소 동작 경로를 만든다.
-   - 단, 폴더 구조와 경계(boundary)는 처음부터 명확히 한다.
-
-4. 오케스트레이션이 중심
-   - 단순 채팅 기능보다 orchestration graph / role routing / step event / review loop를 핵심 1급 기능으로 취급한다.
-
-5. 로컬 자원 친화적
-   - 파일 저장, 하드웨어 모니터링, GPU 토글, host Ollama 연결이 자연스럽게 동작해야 한다.
-
-6. 운영 가능성
-   - 환경변수, 로깅, migration, health endpoint, 에러 처리를 갖춘다.
-
-======================================================================
-4. 저장소 구조
-======================================================================
-
-모노레포를 아래와 같이 구성하라.
-
+모노레포 구조:
 /
   apps/
-    desktop/                  # Tauri + React 앱
-    api/                      # FastAPI 백엔드
+    desktop/              # Tauri + React
+    api/                  # FastAPI + LangGraph + SQLAlchemy
   packages/
-    types/                    # 공유 DTO / 타입 / schema
-    prompts/                  # orchestration prompt templates
-    config/                   # 공통 설정
-    ui/                       # 필요 시 shared ui helpers
+    types/                # 프론트/백엔드 공유 타입
+    config/               # 공통 설정
+    prompts/              # 오케스트레이션 프롬프트 템플릿
+    ui/                   # 공통 UI 유틸 또는 공유 컴포넌트
   infrastructure/
-    docker/
     compose/
-    env/
     scripts/
+    env/
   docs/
     architecture/
     api/
     adr/
-    setup/
-  data/                       # 로컬 실행 시 데이터 루트(개발용 예시)
-  .env.example
-  README.md
+    runbooks/
 
-만약 현재 저장소 구조가 다르다면:
-- 기존 구조를 먼저 분석
-- 가능한 범위에서 위 구조에 수렴시키되
-- 이미 동작 중인 부분은 파괴적으로 갈아엎지 말고 점진적으로 정리한다
+필수 산출물:
+- 모노레포 디렉토리 구조
+- 실제 소스 코드 파일
+- 환경변수 예시(.env.example)
+- Docker Compose
+- Alembic 마이그레이션
+- DB 모델 및 스키마
+- FastAPI 라우터/서비스
+- React/Tauri 화면 및 상태관리
+- Ollama 클라이언트
+- LangGraph 오케스트레이터
+- 업로드/저장/인덱싱 파이프라인
+- 테스트 코드
+- README 및 실행 가이드
+- 아키텍처 문서 및 핵심 ADR
 
-======================================================================
-5. 먼저 해야 할 일
-======================================================================
+기능 요구사항 - UI:
+1. 상단 영역
+- CPU, GPU, Memory, Disk 실시간 사용률/사용량 표시
+- GPU 사용 가능 장비 존재 시 GPU 사용 여부 토글 표시
+- 작고 조밀한 컨트롤 사용
+- 상태 polling 또는 SSE/WebSocket 방식으로 갱신
 
-코드를 쓰기 전에 반드시 아래 순서로 수행하라.
-
-1. 현재 저장소 상태 분석
-   - 디렉터리 구조
-   - 사용 중인 패키지 매니저
-   - 기존 빌드 스크립트
-   - 이미 구현된 기능
-   - 미구현 영역
-   - 중복 또는 충돌 가능성
-2. 아키텍처 결정 요약(ADR 스타일, 짧고 명확하게)
-3. 목표 디렉터리 트리 제안
-4. DB 스키마 제안
-5. 백엔드 모듈 경계 정의
-6. 프론트엔드 레이아웃/컴포넌트 트리 정의
-7. 오케스트레이션 그래프 설계
-8. Ollama 연동 전략 확정
-9. 이후 즉시 구현 시작
-
-중요:
-- 이 단계에서 멈추지 말고, 설계 후 바로 구현으로 넘어가라.
-- “확인 부탁” 식으로 멈추지 마라.
-
-======================================================================
-6. 핵심 UI 요구사항
-======================================================================
-
-3패널 데스크톱 우선 UI를 구현하라.
-
-[상단 영역]
-- CPU 사용률 / 사용량
-- GPU 사용률 / 사용량 (가능한 경우)
-- Memory 사용률 / 사용량
-- Disk 사용률 / 사용량
-- GPU 사용 토글
-- 작은 버튼, 작은 컨트롤, 정보 밀도 높지만 읽기 쉬운 형태
-- polling 또는 streaming으로 실시간 갱신
-
-[왼쪽 영역]
+2. 왼쪽 영역
 - 프로젝트 목록
 - 프로젝트 생성/수정/삭제
 - 프로젝트별 채팅 목록
 - 채팅 생성/삭제
-- 스크롤 가능
-- 리사이즈 가능
-- 최근 사용 기준 정렬이 유용하면 반영
+- 최근 접근 항목 유지
+- 스크롤 및 리사이즈 지원
 
-[중앙 영역]
-- ChatGPT 스타일 대화 타임라인
-- 사용자 메시지 / AI 메시지 / 시스템 이벤트 / 오케스트레이션 이벤트 구분
-- markdown 기반 AI 응답 렌더링
-- 이미지/파일 업로드 및 미리보기
-- drag&drop 업로드
+3. 중앙 영역
+- ChatGPT 스타일의 타임라인형 대화 UI
+- user / assistant / system / orchestrator 이벤트 구분 표시
+- 텍스트 입력
+- 이미지 업로드
+- 일반 파일 업로드
+- 업로드 파일 미리보기
+- AI 응답의 markdown 렌더링
 - 스트리밍 응답 표시
-- 입력창은 텍스트 + 이미지 + 일반 파일 지원
-- 긴 대화에서 스크롤 성능 저하가 없도록 고려
+- 대화 흐름이 자연스럽게 이어져야 함
+- raw JSON을 메인 응답 포맷으로 노출하지 말 것
 
-[오른쪽 영역]
+4. 오른쪽 영역
 - 오케스트레이터 ON/OFF 토글
 - 오케스트레이터용 모델 선택
-- Ollama 모델 목록 표시
-- 미다운로드 모델은 작은 Download 버튼
-- 다운로드 완료 모델은 “다운됨” 상태 표시
-- 모델별 사용 여부 토글
-- 레이블은 왼쪽, 토글은 오른쪽
-- 오케스트레이터 OFF 시 응답 순서 drag&drop 설정
-- 오케스트레이터 ON 시 역할별 모델 매핑 UI
-- 팝업/모달로 orchestration flow 시각화:
-  - 역할
-  - 선택 모델
-  - 실행 순서
-  - 병렬 여부
-  - 중간 요약
-  - 재시도
-  - 리뷰/토론 관계
-  - 승인 대기 상태
+- Ollama 모델 목록
+- 미다운로드 모델은 Download 버튼
+- 다운로드 완료 모델은 설치 상태 표시
+- 모델 사용 토글
+- 오케스트레이터 OFF일 때 모델 응답 순서 변경 drag-and-drop
+- 오케스트레이터 ON일 때 역할-모델 매핑 UI
+- 시각적 팝업/모달에서 역할, 모델, 실행 순서, 중간 결과, 재시도, 승인 대기, debate/review 관계 표시
 
-UI 조건:
-- 반응형
-- 패널 크기 조절
-- 스크롤 자연스럽게
-- 마지막 패널 크기/선택 상태 저장
-- 버튼은 전반적으로 작게
-- 데스크톱 우선이지만 너무 좁아지면 적절히 collapse/fold 고려
+반응형/레이아웃 요구사항:
+- 데스크톱 우선
+- 각 영역 크기 조절 가능
+- 각 영역 스크롤 지원
+- 창 크기에 따라 레이아웃이 무너지지 않아야 함
+- 버튼은 작지만 충분히 클릭 가능해야 함
+- 마지막 패널 크기와 선택 상태를 저장해야 함
 
-======================================================================
-7. 기능 요구사항
-======================================================================
+기능 요구사항 - 대화:
+- 텍스트 입력 가능
+- 이미지 업로드 가능
+- 일반 파일 업로드 가능
+- 첨부 자료는 프로젝트/채팅 단위 디렉토리에 저장
+- 메시지는 입력 순서대로 유지
+- 전체 대화 문맥을 바탕으로 응답 생성
+- 첨부 이미지/파일과 과거 대화 내용을 함께 참고해야 함
+- AI가 생성한 파일/이미지/문서/코드도 저장하고 메타데이터 추적
+- 어떤 대화에서 어떤 모델이 언제 생성했는지 조회 가능해야 함
 
-7.1 프로젝트/채팅
-- Project CRUD
-- Chat thread CRUD
-- 마지막으로 열었던 project/chat 복원
-- soft delete 고려
+파일/산출물 저장 구조:
+data/
+  projects/{project_id}/
+    chats/{chat_id}/
+      uploads/
+      derived/
+      ai_outputs/{message_id}/{model_name}/
 
-7.2 대화
-- 텍스트 메시지 전송
-- 이미지 업로드
-- 파일 업로드
-- 대화 순서 보존
-- 프로젝트/채팅 컨텍스트를 유지한 자연스러운 대화 흐름
-- AI 응답은 JSON이 아니라 사람이 읽기 쉬운 markdown 기반 구조화 응답
-- 필요 시 제목, 요약, 본문, 근거, 다음 단계 형태로 구성
+DB에는 최소한 다음 정보를 저장:
+- project_id
+- chat_id
+- message_id
+- asset_id
+- source_type(user_upload / ai_generated / system_derived)
+- asset_type(image / file / text / other)
+- original_filename
+- mime_type
+- stored_path
+- derived_metadata
+- producing_model
+- producing_role
+- created_at
 
-7.3 파일/이미지 자산 관리
-- 업로드 자료는 project/chat 기준 디렉터리에 저장
-- AI 생성 산출물도 chat/message/model 기준으로 저장
-- 어떤 메시지/모델/역할이 무엇을 만들었는지 추적
-- 재다운로드/재열기 가능
-- 썸네일/미리보기/메타데이터 관리
+오케스트레이터 ON 동작 요구사항:
+- 사용자 입력 분석
+- intent 분류
+- 대화 맥락 수집
+- 첨부 파일/이미지/검색 결과 수집
+- 역할 정의
+- 각 역할에 적합한 모델 선택
+- 순차 또는 병렬 실행
+- 중간 결과 요약/병합
+- critic/reviewer를 통한 검수
+- 필요 시 재시도 또는 fallback
+- 고위험 작업이나 파일 생성, 외부 액션 전 사용자 승인 요청 가능
+- 실행 흐름을 UI에 시각적으로 제공
 
-7.4 오케스트레이터 ON
-- 사용자 요청 분석
-- task decomposition
-- role assignment
-- model routing
-- 실행 순서/병렬성 제어
-- 중간 결과 병합
-- critic/reviewer 또는 debate flow 가능
-- retry / fallback
-- 필요 시 approval gate
-- step event를 UI로 스트리밍
-- orchestration run history 저장
+오케스트레이터 OFF 동작 요구사항:
+- 사용자가 오른쪽 패널에서 모델 선택
+- 선택 모델의 응답 순서 지정 가능
+- 각 모델은 전체 대화와 첨부 문맥을 참고해 답변
+- 독립 응답 모드와 체인 응답 모드를 지원
+- 기본값은 독립 응답 모드
+- 필요 시 마지막에 비교 또는 요약 뷰 제공
 
-7.5 오케스트레이터 OFF
-- 사용자가 선택한 모델 순서대로 응답
-- independent mode / chained mode 지원
-- 기본값은 independent mode
-- 각 모델은 전체 대화 + 업로드 컨텍스트를 참고할 수 있어야 한다
+오케스트레이션 구현 원칙:
+- LangGraph 사용
+- rule-based routing을 먼저 적용
+- 이후 LLM-assisted routing으로 세부 보정
+- 모든 step은 추적 가능해야 함
+- 모든 run은 재현 가능한 로그를 남겨야 함
+- 중간 결과는 사람이 읽을 수 있는 summary 형태로 저장
+- run, step, retry, approval 상태를 DB에 남길 것
 
-======================================================================
-8. 오케스트레이션 설계 - 필수
-======================================================================
-
-LangGraph 기반으로 설계하라.
-
-최소 역할:
+최소 역할 집합:
 - planner
 - context_resolver
 - model_router
@@ -328,127 +211,96 @@ LangGraph 기반으로 설계하라.
 - critic
 - final_responder
 
-그래프는 최소한 아래 기능을 가져야 한다.
-- intent 분석
-- 대화/프로젝트/업로드 컨텍스트 수집
-- 모델 capability / 하드웨어 제약 검사
-- 실행 계획 수립
-- 단계별 worker 실행
-- 조건부 분기
-- 재시도
-- critic/review
-- approval interrupt
-- 최종 응답 조합
-- step-by-step event emission
-- run persistence
+모델 라우팅 규칙 예시:
+- 이미지가 있으면 vision 지원 모델만 후보
+- OCR 또는 문서 분석 필요 시 document path 선행
+- 코드 생성 요청은 coding-capable 모델 우선
+- 긴 추론은 reasoning-capable 모델 우선
+- GPU OFF면 대형 모델 또는 GPU 의존 모델 제외
+- 로컬 모델로 불가능한 기능이면 한계를 명확히 설명
+- 사용자가 특정 모델을 고정한 경우 우선 존중하되, capability mismatch면 경고
 
-라우팅 정책:
-1. **Rule-based routing first**
-   - vision 필요한 경우 vision 가능한 모델만 후보
-   - OCR/문서 처리 필요 시 해당 경로 우선
-   - code task면 code-friendly 모델 우선
-   - GPU 꺼짐이면 대형 GPU-heavy 모델 억제
-   - 적합 모델 없으면 한계를 명확히 설명
-2. **LLM-assisted routing second**
-   - 규칙 필터링 이후 후보 중에서 세부 선택/역할 배치 보정
-
-Debate / review:
-- 최소 2개 모델이 상호 견제/검토 가능한 구조를 열어둔다.
-- 단, 복잡도가 과도하면 first implementation은 critic/reviewer 1개 + final_responder 구조로 시작해도 된다.
-- 이후 확장 가능한 interface를 유지한다.
-
-======================================================================
-9. Ollama 연동 - 필수
-======================================================================
-
-Ollama 연동을 별도 service/client abstraction으로 구현하라.
-
-반드시 제공할 인터페이스:
+Ollama 통합 요구사항:
+백엔드에 명확한 Ollama client abstraction을 구현하라.
+필수 메서드:
 - health_check()
 - list_models()
-- sync_registry()
+- sync_model_registry()
 - pull_model(model_name)
 - delete_model(model_name)
 - chat(model_name, messages, images=None, options=None)
 - embeddings(model_name, input)
-- unload_model(model_name)   # 가능하면
-- prewarm_model(model_name)  # 가능하면
+- warm_model(model_name)
+- unload_model(model_name)
 
-요구사항:
-- Ollama host endpoint는 환경변수 기반
-- 기본값은 localhost:11434
-- 모델 하드코딩 금지
-- registry에 capability metadata 관리
-- vision / embeddings / reasoning / tools 지원 여부 관리
-- 다운로드 진행률을 UI에 전달할 수 있게 event 또는 polling 설계
-- Ollama 미기동 상태에서 graceful handling
+필수 동작:
+- Ollama 서버 연결 확인
+- 설치 모델 목록 조회
+- 모델 다운로드 진행 상태 반영
+- 모델 capability 메타 관리
+- 멀티모달 모델과 텍스트 모델 구분
+- 추후 provider 확장 가능하도록 인터페이스 분리
 
-======================================================================
-10. 멀티모달 / 업로드 / RAG
-======================================================================
+모델 레지스트리 요구사항:
+ModelRegistry 테이블에 최소 저장:
+- id
+- model_name
+- provider
+- downloaded
+- enabled
+- supports_vision
+- supports_tools
+- supports_embeddings
+- supports_reasoning
+- preferred_roles
+- last_seen_at
+- sort_order
+- metadata_json
 
-단순 파일 첨부가 아니라, 검색 가능한 프로젝트 자료 체계로 구현하라.
-
-인제스트 파이프라인:
-- MIME 판별
+멀티모달/RAG 요구사항:
+- 파일 업로드 시 MIME type 판별
 - 원본 저장
-- 메타 생성
 - 텍스트 추출
 - 필요 시 OCR
-- 청크 분리
-- 임베딩 생성
+- chunking
+- embedding 생성
 - Qdrant 인덱싱
-- asset/message/chat/project 연계 저장
+- project/chat/message/asset 기준으로 source tracing 가능해야 함
+- 추론 시 관련 청크를 retrieve해서 모델 컨텍스트로 제공
+- 대형 문서를 raw로 모델에 그대로 넣지 말고 retrieval + 요약 방식을 사용
 
-대화 시:
-- 현재 chat 우선
-- 필요 시 project 범위까지 확장
-- 관련 chunk retrieval
-- 필요한 범위만 모델 입력에 포함
-- 너무 큰 원문 전체를 무작정 프롬프트에 넣지 말 것
+지원 우선 파일 타입:
+- txt
+- md
+- pdf
+- docx
+- xlsx
+- csv
+- png
+- jpg
+- jpeg
+- webp
 
-이미지 처리:
-- vision-capable 모델 사용
-- 필요 시 이미지 설명/분석 결과를 중간 컨텍스트로 저장 가능
+하드웨어 모니터링 요구사항:
+- CPU usage
+- memory usage
+- disk usage
+- GPU usage
+- GPU memory
+- GPU availability
+- graceful fallback
+- 지원되지 않는 환경에서 앱이 죽으면 안 됨
+- psutil 기반 기본 구현
+- GPU는 가능한 범위에서 vendor-aware 구현, 없으면 unsupported 처리
 
-출처 표현:
-- 답변에 활용한 업로드 자료는 사람이 읽기 쉬운 방식으로 참조할 수 있게 설계
-- 예: 파일명, 페이지 범위, 자산명, 첨부 미리보기 연결
-
-======================================================================
-11. 하드웨어 모니터링
-======================================================================
-
-실시간 시스템 상태를 제공하라.
-
-최소 수집 항목:
-- CPU %
-- Memory 사용량/사용률
-- Disk 사용량/사용률
-- GPU 사용량/사용률 (가능한 경우)
-- GPU 존재 여부
-- GPU 사용 가능 토글 상태
-
-구현 원칙:
-- OS 차이에 대한 abstraction 제공
-- Python backend에서 psutil 활용 가능
-- GPU는 vendor/OS 상황에 따라 graceful fallback
-- 수집 불가 시 UI를 조용히 degrade
-- metric fetch 실패가 앱 전체 오류로 번지면 안 됨
-
-======================================================================
-12. 데이터 모델
-======================================================================
-
-아래 테이블/엔티티를 포함하라.
-
+필수 DB 스키마:
 Project
 - id
 - name
 - description
 - created_at
 - updated_at
-- deleted_at nullable
+- deleted_at
 
 ChatThread
 - id
@@ -456,17 +308,17 @@ ChatThread
 - title
 - created_at
 - updated_at
-- deleted_at nullable
+- deleted_at
 
 Message
 - id
 - project_id
 - chat_thread_id
-- role (user / assistant / system / orchestrator)
+- role
 - content_markdown
 - plain_text_cache
-- model_name nullable
-- model_role nullable
+- model_name
+- model_role
 - sequence_no
 - created_at
 
@@ -474,15 +326,15 @@ Asset
 - id
 - project_id
 - chat_thread_id
-- message_id nullable
-- source_type (user_upload / ai_generated / system_derived)
-- asset_type (image / file / text / other)
+- message_id
+- source_type
+- asset_type
 - mime_type
 - original_filename
 - stored_path
 - derived_metadata_json
-- producing_model nullable
-- producing_role nullable
+- producing_model
+- producing_role
 - created_at
 
 ModelRegistry
@@ -495,8 +347,8 @@ ModelRegistry
 - supports_tools
 - supports_embeddings
 - supports_reasoning
-- preferred_roles json
-- sort_order nullable
+- preferred_roles_json
+- sort_order
 - last_seen_at
 
 OrchestrationRun
@@ -508,7 +360,7 @@ OrchestrationRun
 - graph_name
 - started_at
 - ended_at
-- final_message_id nullable
+- final_message_id
 
 OrchestrationStep
 - id
@@ -523,419 +375,301 @@ OrchestrationStep
 - started_at
 - ended_at
 
-추가로 필요한 보조 엔티티가 있으면 합리적으로 추가하라.
-반드시 migration을 작성하고, 인덱스와 FK를 신경 써라.
+설계 원칙:
+- SQLAlchemy 2.x typed mapping 사용
+- Alembic migration 포함
+- soft delete가 필요한 엔티티는 deleted_at 사용
+- 주요 조회 컬럼에 인덱스 추가
+- sequence_no로 메시지 순서 보장
 
-======================================================================
-13. 파일 저장 구조
-======================================================================
-
-로컬 파일 저장 구조를 일관되게 유지하라.
-
-예시:
-data/projects/{project_id}/
-  chats/{chat_id}/
-    uploads/
-    derived/
-    ai_outputs/{message_id}/{model_name}/
-
-규칙:
-- 파일명 sanitize
-- path traversal 방지
-- collision-safe naming
-- DB와 filesystem metadata 동기화
-- 파일만 믿지 말고 DB를 source of truth로 관리
-
-======================================================================
-14. 백엔드 API 요구사항
-======================================================================
-
-FastAPI로 다음 계열 endpoint를 구현하라.
-
+API 설계 요구사항:
 Projects
-- create
-- list
-- get
-- update
-- delete
+- create/list/get/update/delete
 
 Chats
-- create
-- list by project
-- get
-- delete
+- create/list/get/delete
 
 Messages
-- list by chat
+- list
 - create user message
-- stream assistant response
-- stream orchestration events
+- stream assistant responses
+- list message assets
 
 Assets
 - upload
 - list by chat
-- get metadata
-- download/open reference
+- fetch metadata
+- download/open
+- list generated outputs
 
 Models
-- list
+- list registry
 - sync with Ollama
 - pull/download
 - delete
-- enable/disable
-- update role preferences
+- toggle enabled
 - update sort order
+- update role preferences
 
 Orchestration
 - run
-- stream events
-- get run details
-- list runs
-- approve pending step
-- reject pending step
+- stream execution events
+- get run detail
+- get run history
+- approve step
+- reject step
 
 System
 - health
 - hardware metrics
-- config snapshot (safe subset only)
+- app config
+- ollama connectivity
 
-원칙:
-- DTO 명확화
-- 에러 응답 일관성
-- streaming은 SSE 우선
-- OpenAPI 자동 노출
-- frontend에서 쓰기 쉬운 response shape 유지
-
-======================================================================
-15. 프론트엔드 구현 원칙
-======================================================================
-
-필수 구성:
-- App shell
-- top metrics bar
-- left project/chat sidebar
-- center conversation panel
-- right model/orchestrator panel
+프론트엔드 구현 요구사항:
+- 타입 안정성 유지
+- API contract를 types package 또는 공용 DTO로 정리
+- 페이지/상태/컴포넌트 분리
+- 메시지 타임라인
+- markdown renderer
+- 첨부 preview
+- 드래그 앤 드롭 업로드
+- 모델 패널
 - orchestration modal
-- upload preview components
-- markdown message renderer
-- streaming message UI
-- error/empty/loading states
-- toast notifications
-- persisted panel sizes and last selections
+- 토스트 알림
+- empty/loading/error state
+- optimistic update를 신중하게 사용
+- panel size, selected project/chat, mode 상태를 로컬 저장
 
-상태 관리:
-- 서버 상태는 TanStack Query
-- UI 상태는 Zustand
-- 타입은 backend DTO와 강하게 맞춘다
-
-컴포넌트 원칙:
-- presentational / container 성격 분리
-- 너무 큰 god component 금지
-- hooks를 재사용 가능하게 분리
-- 컴포넌트명, props, 폴더 구조 일관성 유지
-
-======================================================================
-16. UX 원칙
-======================================================================
-
-- 버튼은 작고 촘촘하게
-- 전체적으로 modern clean desktop UI
-- 정보 밀도는 높지만 읽기 쉬워야 함
-- 키보드 친화성 고려
-- 긴 응답도 보기 편해야 함
-- 모델 capability badge 제공:
-  - vision
-  - reasoning
-  - embeddings
-  - tools
-  - downloaded
-  - enabled
-- AI 답변은 polished assistant 형태로 보여야 함
-- raw JSON을 메인 표시 형식으로 쓰지 말 것
-
-======================================================================
-17. 보안 / 안정성 / 견고성
-======================================================================
-
-반드시 신경 쓸 것:
-- 파일명 sanitization
+보안/안정성 요구사항:
+- 파일명 sanitize
 - path traversal 방지
-- 업로드 MIME / size validation
-- Ollama 다운/타임아웃 graceful handling
-- 다운로드 실패 graceful handling
-- orchestration step failure logging
-- 환경변수 기반 설정
-- 프론트엔드에 secret 노출 금지
-- 예외가 발생해도 앱 전체가 망가지지 않게 boundary 처리
+- 업로드 크기 제한
+- 허용 MIME 정책
+- Ollama 미실행 상태 graceful handling
+- 모델 다운로드 실패 graceful handling
+- 타임아웃과 재시도 정책
+- 에러 로깅
+- 프론트에 secret 노출 금지
+- 설정은 환경변수 기반으로 분리
 
-======================================================================
-18. 로깅 / 추적 / 관측성
-======================================================================
+관측성 요구사항:
+- structured logging
+- request ID
+- orchestration run ID
+- step 단위 로그
+- frontend error boundary
+- dev mode에서 디버그 로그 강화
+- 선택적으로 trace panel 제공
 
-구현하라:
-- 구조화 로그
-- request correlation id
-- orchestration run id
-- orchestration step 로그
-- dev 모드에서 읽기 쉬운 로그
-- UI debug trace panel(가능하면)
-- 주요 오류에 대한 사용자 친화적 메시지
+UX 세부 요구사항:
+- small buttons
+- dense but readable layout
+- modern desktop-first UI
+- clear badges: downloaded, active, vision, reasoning, embeddings, orchestrator role
+- AI 응답은 요약 + 구조화된 설명 + 다음 행동 또는 참고 정보 형태로 표시
+- 사람이 읽기 좋은 markdown을 사용하되 과도한 장식은 피할 것
 
-======================================================================
-19. 테스트 전략
-======================================================================
+테스트 요구사항:
+- backend unit test
+- service test
+- API integration test
+- frontend component test
+- basic e2e smoke test
+- 최소한 health, project/chat CRUD, model registry sync, message flow, upload flow, orchestration run 기본 경로 테스트 포함
 
-반드시 기본 테스트 뼈대를 포함하라.
+문서화 요구사항:
+- README
+- run instructions
+- architecture overview
+- ADR: 왜 Tauri인지, 왜 host Ollama인지, 왜 LangGraph인지
+- API summary
+- env example
+- troubleshooting
 
-Backend:
-- pytest
-- service 단위 테스트
-- routing policy 테스트
-- API smoke test
-
-Frontend:
-- vitest
-- react testing library
-- 주요 UI 상태/컴포넌트 렌더링 테스트
-
-E2E:
-- Playwright 가능하면 포함
-- 최소한 프로젝트 생성 → 채팅 생성 → 메시지 전송 → 모델 응답 스트림 기본 경로 검증
-
-======================================================================
-20. 개발 단계(마일스톤)
-======================================================================
-
-아래 순서로 진행하라. 각 단계 종료 시 빌드 가능한 상태를 유지한다.
-
-[Milestone 1]
+작업 순서:
+Milestone 1
 - 모노레포 스캐폴딩
-- desktop shell 기본 구성
-- api 기본 구성
-- Docker Compose(postgres, qdrant)
-- .env.example
-- base DB schema + migration
-- 기본 3패널 레이아웃
-- project/chat CRUD
-- README 실행 방법
+- Tauri + React + FastAPI 기본 구조
+- Docker Compose(Postgres, Qdrant)
+- DB 초기 스키마
+- 3패널 UI + 상단 바
+- 프로젝트/채팅 CRUD
+- 기본 README
 
-수용 기준:
-- 앱 실행 가능
-- 프로젝트/채팅 생성 및 목록 표시 가능
-- 기본 레이아웃 동작
-- migration 정상 수행
+Milestone 2
+- Ollama client
+- model registry
+- 우측 패널 모델 목록/동기화/다운로드/토글
+- 단일 모델 대화
+- assistant message 저장
+- 스트리밍 응답
 
-[Milestone 2]
-- Ollama client/service
-- model registry 동기화
-- 모델 목록 UI
-- 다운로드 버튼/상태 표시
-- 단일 모델 chat streaming
-
-수용 기준:
-- Ollama 연결 상태 확인 가능
-- 모델 목록 확인 가능
-- 다운로드 요청 가능
-- 단일 모델 응답 스트리밍 가능
-
-[Milestone 3]
+Milestone 3
 - 파일/이미지 업로드
-- asset storage
-- preview UI
+- asset 저장 구조
+- preview
 - ingestion pipeline
-- retrieval support
+- retrieval 연동
 
-수용 기준:
-- 업로드 가능
-- chat/project별 파일 정리 가능
-- retrieval 기반 context 주입 시작
+Milestone 4
+- LangGraph orchestrator
+- run/step persistence
+- orchestration event stream
+- 역할-모델 매핑
+- orchestration modal
 
-[Milestone 4]
-- LangGraph orchestration
-- role routing
-- step persistence
-- event streaming
-- orchestration modal visualization
+Milestone 5
+- 수동 멀티모델 순차 응답
+- 독립/체인 모드
+- critic/reviewer 흐름
+- generated artifact tracking
 
-수용 기준:
-- 오케스트레이터 ON 시 역할 분해 및 단계 이벤트 확인 가능
-- step 기록 조회 가능
-
-[Milestone 5]
-- multi-model ordered response mode
-- independent / chained mode
-- critic/reviewer loop
-- AI generated artifacts tracking
-
-수용 기준:
-- 여러 모델 순차 응답
-- critic/review 동작
-- 생성 산출물 저장/조회 가능
-
-[Milestone 6]
-- 테스트 보강
+Milestone 6
+- 하드웨어 메트릭 실제 연결
+- UX polish
+- 테스트 강화
 - packaging
-- 문서화
-- polish
-- 성능/UX 개선
+- 문서 보강
 
-======================================================================
-21. 출력 방식 규칙
-======================================================================
+매 턴 출력 형식:
+1. 이번 턴 목표
+2. 현재 저장소 분석 결과
+3. 변경할 파일 목록
+4. 실제 코드 생성/수정
+5. 실행 방법
+6. 테스트 방법
+7. 남은 리스크와 다음 우선순위
 
-매 응답에서 다음 규칙을 지켜라.
+금지사항:
+- 핵심 기능을 TODO만 남기고 끝내지 말 것
+- 실행 불가능한 의사코드만 제시하지 말 것
+- 이미 있는 파일을 이유 없이 전부 재작성하지 말 것
+- 사용자가 묻지 않은 사소한 확인 질문 남발 금지
+- raw JSON을 최종 UI 답변 포맷으로 삼지 말 것
+- 업로드 경로를 사용자 입력 문자열에 직접 의존하지 말 것
+- 하드웨어/GPU 미지원 환경에서 앱이 죽게 만들지 말 것
 
-1. 먼저 현재 작업 목표를 1~3문장으로 요약
-2. 그 다음 실제 변경 사항을 파일 단위로 제시
-3. 필요한 경우 핵심 코드 조각을 포함
-4. 실행/검증 방법을 명확히 제시
-5. 불필요한 장문 이론 설명은 줄이고 실제 구현을 우선
-6. 핵심 의사결정은 짧게 이유를 남긴다
-7. 작업이 길어지면 중간 진행상황을 간결히 공유하되, 멈추지 말고 계속 구현한다
+완료 기준:
+- 로컬에서 실행 가능
+- DB migration 가능
+- API 서버 기동 가능
+- 프론트 앱 기동 가능
+- Tauri dev 실행 가능
+- 프로젝트/채팅/메시지 흐름 동작
+- 모델 목록 및 다운로드 UI 동작
+- 최소 1개 모델로 assistant 응답 생성 가능
+- 파일 업로드 및 저장 추적 가능
+- 오케스트레이터 기본 경로 동작
+- 테스트 스위트 기본 경로 통과
+- README 기준 설치/실행이 재현 가능
 
-======================================================================
-22. 금지 사항
-======================================================================
+지금 당장 시작할 작업:
+1. 현재 저장소를 분석하라.
+2. 목표 구조와 실제 구조의 차이를 식별하라.
+3. 필요한 폴더와 파일을 생성하라.
+4. Tauri + React + FastAPI + Compose 기본 실행 경로를 만들라.
+5. DB 모델과 Alembic을 구성하라.
+6. 프로젝트/채팅 CRUD와 3패널 UI를 실제로 연결하라.
+7. 이후 Milestone 순서대로 끊김 없이 구현을 이어가라.
 
-- 핵심 경로에서 TODO만 남기고 끝내기
-- “예시입니다” 수준의 껍데기 코드만 대량 생성
-- 빌드 불가능한 상태로 방치
-- 기존 코드 무시 후 전면 재작성
-- 모델명 하나에 과도하게 결합된 설계
-- raw JSON을 사용자 메인 응답 UI로 그대로 출력
-- 검증 없이 무작정 대규모 리팩터링
-
-======================================================================
-23. 추가 권장 기능
-======================================================================
-
-구조를 망치지 않는 범위에서 다음을 추가해도 좋다.
-- project memory summary
-- conversation search
-- pinned messages
-- orchestration templates
-- performance mode selector (Fast / Balanced / Quality / Debate / Review-heavy)
-- import/export project package
-- local backup/restore
-- generated artifact provenance viewer
-
-======================================================================
-24. 지금 바로 시작할 작업
-======================================================================
-
-지금 즉시 아래 순서로 시작하라.
-
-1. 현재 저장소 스캔
-2. 구조/기술 스택/구현 상태 파악
-3. 목표 구조와 차이 분석
-4. Milestone 1 구현 시작
-5. 필요한 파일 생성/수정
-6. 실행 방법 문서화
-7. 이후 순차적으로 다음 milestone 진행
-
-중요:
-- broad clarification 없이 진행
-- 코드 우선
-- 각 단계마다 runnable state 유지
-- repository의 현재 상태를 존중하면서 점진적으로 완성도를 끌어올릴 것
-
-이제 구현을 시작하라.
+이제 바로 구현을 시작하라.
 ```
 
----
-
-## 후속 제어 프롬프트 1 — 이어서 구현
+## 후속 작업 프롬프트
 
 ```text
-현재 저장소 상태를 먼저 분석하고, 이미 구현된 내용을 보존하면서 `multi-orche-ai-chat` 개발을 계속 진행하라.
+현재 저장소 상태를 기준으로 이어서 작업하라.
+먼저 기존 파일을 모두 읽고, 이미 구현된 부분은 유지하되 구조적으로 부족한 부분만 정확히 보강하라.
 
-규칙:
-- 기존 동작 코드를 불필요하게 뒤엎지 말 것
-- build/run 가능 상태를 유지할 것
-- 새 기능을 넣을 때는 frontend + backend + persistence를 함께 연결할 것
-- 설정 변경 시 README와 .env.example도 함께 갱신할 것
-- 핵심 로직에는 테스트를 추가할 것
+이번 턴의 단일 목표:
+[여기에 한 가지 목표를 입력]
 
-현재 우선순위:
-[여기에 현재 우선순위를 넣어라]
 예시:
-- Ollama 모델 패널 완성
-- asset upload pipeline 구현
-- orchestration graph 및 step event stream 구현
-- drag and drop 모델 순서 기능 구현
+- Ollama 모델 목록/다운로드/토글 UI 및 API 구현
+- assistant 응답 스트리밍 구현
+- Asset 업로드 및 프로젝트/채팅별 저장 구조 구현
+- LangGraph 오케스트레이터와 step persistence 구현
+- 하드웨어 메트릭 API 및 상단 바 연결
+
+작업 규칙:
+- 목표 하나에 집중할 것
+- 관련 없는 리팩터링 금지
+- 백엔드/프론트엔드/DB가 실제로 연결되도록 구현할 것
+- 변경 파일 목록을 먼저 제시하고 실제 코드 수정으로 이어갈 것
+- 작업 후 실행 방법과 테스트 방법을 반드시 제시할 것
+- build/run이 깨지지 않게 유지할 것
 ```
 
----
-
-## 후속 제어 프롬프트 2 — 오케스트레이션 집중
+## 보정/재정렬 프롬프트
 
 ```text
-`multi-orche-ai-chat`의 오케스트레이션 서브시스템만 집중적으로 구현하라.
+현재 저장소를 점검하고, multi-orche-ai-chat의 목표 아키텍처와 비교하여 부족하거나 잘못 구현된 부분을 수정하라.
 
-필수 구현:
-- LangGraph 기반 상태 모델
-- planner node
-- context_resolver node
-- model_router node
-- worker execution nodes
-- critic / reviewer node
-- final_responder node
-- retry / fallback policy
-- approval interrupt flow
-- orchestration run persistence
-- UI에 전달 가능한 step event DTO
-- popup/modal 친화적 trace data 구조
+점검 기준:
+- Tauri 데스크톱 구조 존재 여부
+- FastAPI + LangGraph + Alembic + SQLAlchemy 구조 완성도
+- Ollama 클라이언트 및 모델 레지스트리 존재 여부
+- 파일 업로드 및 Asset 추적 구조 존재 여부
+- Qdrant retrieval pipeline 존재 여부
+- 오케스트레이터 run/step persistence 존재 여부
+- 상단 하드웨어 모니터링 실데이터 존재 여부
+- 우측 패널 모델 제어 UI 존재 여부
+- assistant 응답 스트리밍 존재 여부
+- 테스트 및 문서화 수준
 
-규칙:
-- rule-based routing을 먼저 적용하고, 그 다음 LLM-assisted routing을 적용할 것
-- vision / document / code / reasoning 역할 분배를 지원할 것
-- provider-agnostic interface를 유지하되 첫 provider는 Ollama로 구현할 것
-- 각 orchestration step은 audit 가능해야 하며, 가능한 범위에서 resumable 구조를 고려할 것
+수정 원칙:
+- 구조는 살리고, 제품 비전에 맞지 않는 부분을 보강할 것
+- placeholder를 실제 기능으로 바꿀 것
+- 핵심 기능은 의사코드가 아니라 동작 코드로 만들 것
+- 필요한 경우 migration, schema, API, UI를 모두 연쇄 수정할 것
 ```
 
----
-
-## 후속 제어 프롬프트 3 — UI/UX 집중
+## Codex 제어를 더 강하게 하고 싶을 때 맨 앞에 붙일 문구
 
 ```text
-`multi-orche-ai-chat`의 데스크톱 UI/UX만 집중적으로 고도화하라.
-
-필수 구현:
-- 반응형 3패널 레이아웃
-- 상단 hardware metrics bar
-- 작은 버튼 스타일 시스템
-- resizable panels
-- scrollable side panels
-- ChatGPT 스타일 message timeline
-- markdown assistant renderer
-- file/image upload + preview UX
-- model download/toggle/status UX
-- orchestrator modal with execution flow visualization
-- manual multi-model mode drag-and-drop ordering
-
-디자인 원칙:
-- desktop-first
-- dense but readable
-- modern clean spacing
-- strong empty/loading/error states
-- keyboard-friendly
-- last active selections and panel sizes persisted
+너는 조언자가 아니라 주 구현자다.
+현재 저장소를 먼저 분석하고, 실제 파일을 생성/수정해서 기능을 완성하라.
+핵심 경로에서는 의사코드로 멈추지 말고 실행 가능한 코드로 구현하라.
+말보다 코드와 실행 결과를 우선하라.
 ```
 
----
+## 권장 운용 방식
 
-## 권장 사용 팁
-1. 첫 실행은 반드시 **메인 프롬프트 전체**를 넣습니다.
-2. 저장소가 어느 정도 만들어진 뒤에는 후속 프롬프트를 조합합니다.
-3. 모델이 장황하게 설명만 하려 하면, 다음 문장을 추가합니다.  
-   **“설명보다 코드와 파일 변경을 우선하라. 핵심 경로에서 의사코드로 멈추지 마라.”**
-4. 큰 단위 구현이 끝날 때마다 빌드/실행/테스트 결과를 요구합니다.
-5. 오케스트레이션이 약하면 “오케스트레이션 집중” 프롬프트를 따로 넣어 강화합니다.
+### 처음 시작할 때
+- 메인 통합 프롬프트 전체를 사용
+- 저장소가 비어 있거나 크게 잘못된 경우 적합
 
----
+### 이미 일부 코드가 있을 때
+- 메인 통합 프롬프트 대신 보정/재정렬 프롬프트 사용
+- 그 다음 후속 작업 프롬프트로 기능별 확장
 
-## 빠른 복사용 한 줄 보강 문구
-```text
-당신은 조언자가 아니라 주 구현자다. 추상적 설명보다 동작하는 코드, 실제 파일 변경, 실행 가능한 구조를 우선하라. 핵심 경로에서 TODO나 의사코드로 멈추지 말고, 저장소를 읽은 뒤 바로 구현을 진행하라.
-```
+### 가장 추천하는 진행 순서
+1. 메인 통합 프롬프트
+2. `이번 턴의 단일 목표`에 `Tauri + FastAPI + Compose + CRUD` 지정
+3. 다음 턴에 `Ollama 모델 목록/다운로드/토글`
+4. 다음 턴에 `assistant 응답 스트리밍`
+5. 다음 턴에 `Asset 업로드 + 저장 구조 + Qdrant`
+6. 다음 턴에 `LangGraph 오케스트레이터`
+7. 다음 턴에 `수동 멀티모델 모드`
+8. 마지막에 `테스트/문서/패키징`
+
+## Codex가 자주 놓치는 항목 체크리스트
+
+- Tauri를 빼고 일반 웹앱으로만 만들지 않았는가
+- Ollama 연동을 placeholder가 아니라 실제 API 호출로 구현했는가
+- 모델 다운로드 진행 상태를 UI에 반영했는가
+- assistant 응답을 실제로 생성하고 저장하는가
+- 스트리밍 응답이 동작하는가
+- 파일 업로드가 project/chat별 디렉토리에 저장되는가
+- Asset 메타데이터를 DB에 남기는가
+- Qdrant retrieval이 실제로 연결되는가
+- 오케스트레이터 run/step이 DB에 저장되는가
+- 우측 패널이 단순 설명이 아니라 실제 제어 UI인가
+- 상단 하드웨어 바가 `--%` placeholder가 아니라 실데이터인가
+- 테스트와 README가 실행 기준으로 정리되어 있는가
+
+## 마지막 팁
+
+Codex에 너무 긴 맥락을 매번 다시 넣기보다,  
+**첫 턴은 메인 프롬프트 전체**,  
+그 다음부터는 **후속 작업 프롬프트 + 이번 턴 목표 한 줄** 방식이 가장 안정적입니다.
