@@ -354,6 +354,7 @@ export function ChatPanel() {
                     <span>model={asset.producing_model ?? '-'}</span>
                     <span>role={asset.producing_role ?? '-'}</span>
                     <span>kind={asset.derived_metadata_json?.kind ?? 'unknown'}</span>
+                    <span>summary={asset.derived_metadata_json?.artifact_summary ?? '-'}</span>
                   </div>
                 ))}
               </div>
