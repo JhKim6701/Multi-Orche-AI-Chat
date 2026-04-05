@@ -148,6 +148,8 @@ export function ChatPanel() {
 
   const timeline = useMemo(() => messages.slice().sort((a, b) => a.sequence_no - b.sequence_no), [messages]);
   const activeStepId = runDetail?.steps?.find((step) => step.status === 'running')?.id;
+  const latestAssistant = [...timeline].reverse().find((m) => m.role === 'assistant');
+  const usedAssetsLine = latestAssistant?.content_markdown?.split("\n").find((line) => line.includes("[Used assets]"));
 
   return (
     <main style={{ padding: 10, height: '100%', display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -174,6 +176,7 @@ export function ChatPanel() {
         {assets.length === 0 ? <small>No uploads</small> : assets.map((a) => (
           <div key={a.id} style={{ fontSize: 12, marginBottom: 4 }}>
             <a href={`${API_BASE}/assets/${a.id}/download`} target="_blank">{a.original_filename}</a>
+            <small style={{ marginLeft: 6 }}>[{a.derived_metadata_json?.ingest_status ?? "uploaded"}] chunks:{a.derived_metadata_json?.chunk_count ?? 0}</small>
             {a.mime_type.startsWith('image/') && (
               <div>
                 <img src={`${API_BASE}/assets/${a.id}/download`} alt={a.original_filename} style={{ maxWidth: 140, maxHeight: 100, marginTop: 4 }} />
@@ -182,6 +185,13 @@ export function ChatPanel() {
           </div>
         ))}
       </section>
+
+      {usedAssetsLine && (
+        <section style={{ border: '1px solid #eee', borderRadius: 6, padding: 8, fontSize: 12 }}>
+          <strong>Used assets in latest response</strong>
+          <div>{usedAssetsLine}</div>
+        </section>
+      )}
 
       {orchestratorOn && (
         <section style={{ border: '1px solid #eee', borderRadius: 6, padding: 8 }}>

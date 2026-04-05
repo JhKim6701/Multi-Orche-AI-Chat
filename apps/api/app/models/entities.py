@@ -72,6 +72,18 @@ class Asset(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class AssetChunk(Base):
+    __tablename__ = "asset_chunks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    asset_id: Mapped[int] = mapped_column(ForeignKey("assets.id"), index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    chat_thread_id: Mapped[int] = mapped_column(ForeignKey("chat_threads.id"), index=True)
+    chunk_index: Mapped[int] = mapped_column(Integer)
+    content_text: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class ModelRegistry(Base):
     __tablename__ = "model_registry"
 
@@ -120,3 +132,4 @@ class OrchestrationStep(Base):
 
 
 Index("ix_messages_chat_sequence", Message.chat_thread_id, Message.sequence_no)
+Index("ix_asset_chunks_asset_id", AssetChunk.asset_id)

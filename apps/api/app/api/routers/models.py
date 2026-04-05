@@ -17,6 +17,16 @@ class PullRequest(BaseModel):
     model_name: str
 
 
+def detect_capabilities(model_name: str) -> dict:
+    n = model_name.lower()
+    return {
+        "supports_vision": any(x in n for x in ["vision", "llava", "qwen2.5-vl", "bakllava", "moondream"]),
+        "supports_reasoning": any(x in n for x in ["reason", "r1", "qwq", "deepseek", "o1"]),
+        "supports_embeddings": any(x in n for x in ["embed", "nomic-embed", "bge", "e5"]),
+        "supports_tools": any(x in n for x in ["tool", "function"]),
+    }
+
+
 @router.get("", response_model=list[ModelRegistryOut])
 def list_registry(db: Session = Depends(get_db)):
     return db.scalars(select(ModelRegistry).order_by(ModelRegistry.sort_order.asc(), ModelRegistry.model_name.asc())).all()
@@ -42,13 +52,18 @@ async def sync_registry(db: Session = Depends(get_db)):
     for item in remote:
         name = item["name"]
         seen.add(name)
+        caps = detect_capabilities(name)
         model = known.get(name)
         if not model:
-            model = ModelRegistry(model_name=name, downloaded=True, last_seen_at=datetime.utcnow())
+            model = ModelRegistry(model_name=name, downloaded=True, last_seen_at=datetime.utcnow(), **caps)
             db.add(model)
         else:
             model.downloaded = True
             model.last_seen_at = datetime.utcnow()
+            model.supports_vision = caps["supports_vision"]
+            model.supports_reasoning = caps["supports_reasoning"]
+            model.supports_embeddings = caps["supports_embeddings"]
+            model.supports_tools = caps["supports_tools"]
 
     for model in known.values():
         if model.model_name not in seen:
@@ -66,12 +81,17 @@ async def pull_model(payload: PullRequest, db: Session = Depends(get_db)):
     except OllamaUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
+    caps = detect_capabilities(payload.model_name)
     model = db.scalar(select(ModelRegistry).where(ModelRegistry.model_name == payload.model_name))
     if not model:
-        model = ModelRegistry(model_name=payload.model_name, downloaded=True)
+        model = ModelRegistry(model_name=payload.model_name, downloaded=True, **caps)
         db.add(model)
     model.downloaded = True
     model.last_seen_at = datetime.utcnow()
+    model.supports_vision = caps["supports_vision"]
+    model.supports_reasoning = caps["supports_reasoning"]
+    model.supports_embeddings = caps["supports_embeddings"]
+    model.supports_tools = caps["supports_tools"]
     db.commit()
     return {"ok": True}
 

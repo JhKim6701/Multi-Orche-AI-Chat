@@ -4,7 +4,17 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import Asset, Message, ModelRegistry, RoleEnum
+from app.services.asset_ingestion import retrieve_relevant_context
 from app.services.ollama_client import OllamaClient
+
+
+def _build_context_block(context_hits: list[dict]) -> str:
+    if not context_hits:
+        return ""
+    lines = ["참고 자산 컨텍스트:"]
+    for hit in context_hits:
+        lines.append(f"- asset#{hit['asset_id']}({hit['filename']}): {hit['snippet']}")
+    return "\n".join(lines)
 
 
 async def execute_chat(
@@ -46,6 +56,9 @@ async def execute_chat(
         for asset in assets:
             asset.message_id = user_msg.id
 
+    context_hits = retrieve_relevant_context(db=db, chat_thread_id=chat_thread_id, query=content_markdown, limit=6)
+    context_block = _build_context_block(context_hits)
+
     history = db.scalars(select(Message).where(Message.chat_thread_id == chat_thread_id).order_by(Message.sequence_no.asc())).all()
     context_messages = [{"role": m.role.value if hasattr(m.role, "value") else str(m.role), "content": m.content_markdown} for m in history]
 
@@ -55,12 +68,18 @@ async def execute_chat(
 
     for idx, model_name in enumerate(execution_models):
         if execution_mode == "chained":
-            query_messages = context_messages + [{"role": "user", "content": chain_input}]
+            user_content = chain_input
         else:
-            query_messages = context_messages + [{"role": "user", "content": content_markdown}]
+            user_content = content_markdown
+
+        prompt = f"{user_content}\n\n{context_block}" if context_block else user_content
+        query_messages = context_messages + [{"role": "user", "content": prompt}]
 
         response = await client.chat(model_name=model_name, messages=query_messages)
         answer = response.get("message", {}).get("content") or "(empty response)"
+        if context_hits:
+            sources = ", ".join(f"#{h['asset_id']}:{h['filename']}" for h in context_hits[:3])
+            answer = f"{answer}\n\n[Used assets] {sources}"
 
         asst = Message(
             project_id=project_id,

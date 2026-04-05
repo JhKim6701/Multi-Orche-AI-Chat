@@ -27,6 +27,9 @@ def test_execute_message_happy_path(monkeypatch):
     p = client.post('/projects', json={'name': 'exec-project', 'description': None}).json()
     c = client.post('/chats', json={'project_id': p['id'], 'title': 'exec-chat'}).json()
 
+    up = client.post('/assets/upload', data={'project_id': str(p['id']), 'chat_thread_id': str(c['id']), 'source_type': 'user_upload'}, files={'file': ('ref.txt', b'hello retrieval context for model', 'text/plain')})
+    aid = up.json()['id']
+
     res = client.post(
         '/messages/execute',
         json={
@@ -35,14 +38,15 @@ def test_execute_message_happy_path(monkeypatch):
             'content_markdown': 'hello',
             'selected_model_names': ['model-a'],
             'execution_mode': 'independent',
-            'message_asset_ids': []
+            'message_asset_ids': [aid]
         }
     )
 
     assert res.status_code == 200
     payload = res.json()
     assert payload['user_message']['role'] == 'user'
-    assert payload['assistant_messages'][0]['content_markdown'] == 'reply-from-model-a'
+    assert 'reply-from-model-a' in payload['assistant_messages'][0]['content_markdown']
+    assert '[Used assets]' in payload['assistant_messages'][0]['content_markdown']
 
 
 def test_multiple_model_ordered_execution(monkeypatch):

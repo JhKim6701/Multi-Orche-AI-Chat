@@ -1,5 +1,6 @@
 from app.models.entities import (
     Asset,
+    AssetChunk,
     ChatThread,
     Message,
     ModelRegistry,
@@ -11,6 +12,7 @@ from app.models.entities import (
 
 __all__ = [
     "Asset",
+    "AssetChunk",
     "ChatThread",
     "Message",
     "ModelRegistry",

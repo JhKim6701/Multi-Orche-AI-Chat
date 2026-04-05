@@ -70,6 +70,18 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(), nullable=False),
     )
 
+
+    op.create_table(
+        "asset_chunks",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("asset_id", sa.Integer(), sa.ForeignKey("assets.id"), nullable=False),
+        sa.Column("project_id", sa.Integer(), sa.ForeignKey("projects.id"), nullable=False),
+        sa.Column("chat_thread_id", sa.Integer(), sa.ForeignKey("chat_threads.id"), nullable=False),
+        sa.Column("chunk_index", sa.Integer(), nullable=False),
+        sa.Column("content_text", sa.Text(), nullable=False),
+        sa.Column("created_at", sa.DateTime(), nullable=False),
+    )
+
     op.create_table(
         "model_registry",
         sa.Column("id", sa.Integer(), primary_key=True),
@@ -120,10 +132,12 @@ def upgrade() -> None:
     op.create_index("ix_messages_chat_sequence", "messages", ["chat_thread_id", "sequence_no"])
     op.create_index("ix_assets_chat_thread_id", "assets", ["chat_thread_id"])
     op.create_index("ix_model_registry_model_name", "model_registry", ["model_name"], unique=True)
+    op.create_index("ix_asset_chunks_asset_id", "asset_chunks", ["asset_id"])
 
 
 def downgrade() -> None:
     op.drop_index("ix_model_registry_model_name", table_name="model_registry")
+    op.drop_index("ix_asset_chunks_asset_id", table_name="asset_chunks")
     op.drop_index("ix_assets_chat_thread_id", table_name="assets")
     op.drop_index("ix_messages_chat_sequence", table_name="messages")
     op.drop_index("ix_messages_chat_thread_id", table_name="messages")
@@ -132,6 +146,7 @@ def downgrade() -> None:
     op.drop_table("orchestration_steps")
     op.drop_table("orchestration_runs")
     op.drop_table("model_registry")
+    op.drop_table("asset_chunks")
     op.drop_table("assets")
     op.drop_table("messages")
     op.drop_table("chat_threads")

@@ -28,6 +28,7 @@ export interface Asset {
   mime_type: string;
   stored_path: string;
   created_at: string;
+  derived_metadata_json?: { ingest_status?: string; preview?: string; chunk_count?: number } | null;
 }
 
 export interface Model {

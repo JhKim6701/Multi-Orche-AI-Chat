@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import Asset, Message, ModelRegistry, OrchestrationRun, OrchestrationStep, RoleEnum
+from app.services.asset_ingestion import retrieve_relevant_context
 from app.services.ollama_client import OllamaClient
 
 
@@ -22,7 +23,8 @@ def _choose_model(
     selected_model_names: list[str],
     orchestrator_model_name: str | None,
     requires_vision: bool,
-) -> str:
+    needs_reasoning: bool,
+) -> tuple[str, str]:
     q = select(ModelRegistry).where(ModelRegistry.enabled.is_(True), ModelRegistry.downloaded.is_(True))
     if selected_model_names:
         q = q.where(ModelRegistry.model_name.in_(selected_model_names))
@@ -33,14 +35,19 @@ def _choose_model(
     if orchestrator_model_name:
         chosen = next((m for m in rows if m.model_name == orchestrator_model_name), None)
         if chosen:
-            return chosen.model_name
+            return chosen.model_name, "user_selected_orchestrator_model"
 
     if requires_vision:
         vision = next((m for m in rows if m.supports_vision), None)
         if vision:
-            return vision.model_name
+            return vision.model_name, "vision_asset_detected"
 
-    return rows[0].model_name
+    if needs_reasoning:
+        reasoning = next((m for m in rows if m.supports_reasoning), None)
+        if reasoning:
+            return reasoning.model_name, "long_context_reasoning"
+
+    return rows[0].model_name, "sort_order_fallback"
 
 
 def _summarize(text: str, limit: int = 220) -> str:
@@ -76,7 +83,9 @@ async def execute_orchestration(
             asset.message_id = user_message.id
 
     has_image = any(a.mime_type.startswith("image/") for a in assets)
-    has_file = any(not a.mime_type.startswith("image/") for a in assets)
+    context_hits = retrieve_relevant_context(db=db, chat_thread_id=chat_thread_id, query=content_markdown, limit=8)
+    context_block = "\n".join([f"asset#{h['asset_id']} {h['filename']}: {h['snippet']}" for h in context_hits])
+    needs_reasoning = len(context_block) > 800
 
     run = OrchestrationRun(
         project_id=project_id,
@@ -89,15 +98,17 @@ async def execute_orchestration(
     db.add(run)
     db.flush()
 
-    model_name = _choose_model(
+    model_name, routing_reason = _choose_model(
         db=db,
         selected_model_names=selected_model_names,
         orchestrator_model_name=orchestrator_model_name,
         requires_vision=has_image,
+        needs_reasoning=needs_reasoning,
     )
-    planner_prompt = f"사용자 요청을 계획으로 요약하라: {content_markdown}"
-    context_prompt = f"요청에 필요한 컨텍스트를 정리하라. file={has_file}, image={has_image}."
-    router_prompt = f"모델 라우팅 결정을 설명하라. 선택 모델={selected_model_names}, chosen={model_name}"
+
+    planner_prompt = f"사용자 요청을 실행 계획으로 요약하라: {content_markdown}"
+    context_prompt = f"자산 컨텍스트를 요약하라:\n{context_block or '자산 컨텍스트 없음'}"
+    router_prompt = f"모델 라우팅 결정: chosen={model_name}, reason={routing_reason}, has_image={has_image}, context_len={len(context_block)}"
 
     step_plans = [
         StepPlan("planner", "planner", planner_prompt),
@@ -132,8 +143,9 @@ async def execute_orchestration(
             db.flush()
 
         final_prompt = (
-            "다음 중간 결과를 바탕으로 사용자에게 최종 응답을 작성하라.\n"
+            "다음 중간 결과와 자산 컨텍스트를 바탕으로 사용자에게 최종 응답을 작성하라.\n"
             f"user_request: {content_markdown}\n"
+            f"context:\n{context_block or '없음'}\n"
             f"intermediate:\n" + "\n".join(step_outputs)
         )
         final_step = OrchestrationStep(
@@ -150,6 +162,9 @@ async def execute_orchestration(
 
         final_resp = await client.chat(model_name=model_name, messages=[{"role": "user", "content": final_prompt}])
         final_text = final_resp.get("message", {}).get("content") or "(empty)"
+        if context_hits:
+            src = ", ".join(f"#{h['asset_id']}:{h['filename']}" for h in context_hits[:4])
+            final_text = f"{final_text}\n\n[Used assets] {src}"
 
         final_step.status = "completed"
         final_step.output_summary = _summarize(final_text)

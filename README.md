@@ -12,6 +12,7 @@ Ollama 기반 로컬 멀티모델 채팅/오케스트레이션 데스크톱 워�
   - `independent | chained | ordered` 모드
   - assistant 응답 DB 저장 (`model_name`, `model_role` 포함)
 - 파일 업로드 + 프로젝트/채팅 경로 저장 + asset metadata DB 기록
+- 자산 ingest(텍스트 추출/청크) + retrieval snippet 기반 프롬프트 컨텍스트 반영
 - 모델 Sync/Pull/Toggle/Sort (우측 패널과 API 연결)
 - 상단 하드웨어 메트릭 polling
 - 오케스트레이터 ON 시 rule-based orchestration 실행 (planner/context_resolver/model_router/final_responder)
@@ -62,7 +63,7 @@ npm run dev
 - `GET /messages?chat_thread_id=...`
 - `POST /messages/execute` (실제 채팅 실행)
 - `GET /messages/stream?...` (SSE 단일 모델 스트림)
-- `POST /assets/upload`, `GET /assets/chat/{chat_id}`
+- `POST /assets/upload`, `GET /assets/chat/{chat_id}` (ingest status/preview 포함)
 - `POST /models/sync`, `POST /models/pull`, `PATCH /models/{id}/toggle`, `PATCH /models/{id}/sort`
 - `POST /orchestration/run` (실제 step 실행 + 최종 메시지 저장)
 - `GET /orchestration/runs/{id}` (step intermediate + final message 포함)

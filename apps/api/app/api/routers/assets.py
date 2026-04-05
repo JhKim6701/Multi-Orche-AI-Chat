@@ -9,6 +9,7 @@ from app.core.config import settings
 from app.db.session import get_db
 from app.models import Asset
 from app.schemas.asset import AssetOut
+from app.services.asset_ingestion import ingest_asset
 from app.utils.files import safe_join, sanitize_filename
 
 router = APIRouter(prefix="/assets", tags=["assets"])
@@ -46,6 +47,8 @@ async def upload_asset(
         derived_metadata_json={"size": len(content)},
     )
     db.add(asset)
+    db.flush()
+    ingest_asset(db, asset)
     db.commit()
     db.refresh(asset)
     return asset
