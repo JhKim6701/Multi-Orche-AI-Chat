@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -33,6 +33,22 @@ async def runtime_error_handler(_request: Request, exc: RuntimeError):
                 "message": str(exc),
                 "recovery_hint": "환경변수/저장경로/의존성(Ollama,Qdrant)을 확인 후 다시 시도하세요.",
             }
+        },
+    )
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(_request: Request, exc: HTTPException):
+    detail = exc.detail if isinstance(exc.detail, str) else "request failed"
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": {
+                "code": f"http_{exc.status_code}",
+                "message": detail,
+                "recovery_hint": "요청 파라미터/서비스 상태를 확인한 후 재시도하세요.",
+            },
+            "detail": detail,
         },
     )
 

@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from app.core.config import Settings
+from app.services.artifact_manager import create_ai_generated_artifact
 from app.services.runtime_state import set_gpu_enabled
 
 
@@ -34,3 +35,27 @@ def test_artifact_data_path_write(tmp_path: Path):
 def test_runtime_state_toggle_writes_file():
     enabled = set_gpu_enabled(True)
     assert enabled is True
+
+
+def test_artifact_manager_writes_under_upload_root(tmp_path: Path, monkeypatch):
+    class DummyDB:
+        def add(self, _obj):
+            return None
+
+        def flush(self):
+            return None
+
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "upload_root", str(tmp_path / "uploads"))
+    asset = create_ai_generated_artifact(
+        DummyDB(),
+        project_id=1,
+        chat_thread_id=2,
+        message_id=3,
+        content="artifact content",
+        model_name="demo-model",
+        model_role="assistant",
+    )
+    assert str(asset.stored_path).startswith(str(tmp_path / "uploads"))
+    assert Path(asset.stored_path).exists()

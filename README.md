@@ -93,7 +93,7 @@ npm run build:desktop
   - API 서버 (`uvicorn app.main:app`)
   - Ollama (`MOAC_OLLAMA_BASE_URL`)
   - Qdrant (`MOAC_QDRANT_URL`)
-- `npm run doctor`로 desktop 실행 전 `/system/health` 의존성 점검 가능.
+- `npm run doctor`로 desktop 실행 전 `/system/health` + `/system/readiness` 의존성 점검 가능.
 
 ## 로컬 데이터 저장 위치
 

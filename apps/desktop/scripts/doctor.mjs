@@ -17,6 +17,11 @@ async function main() {
     if (payload.status !== 'ok') {
       console.warn('[doctor] Dependencies are degraded. You can still run UI, but execution may fail until dependencies recover.');
     }
+    const readyRes = await fetch(`${api}/system/readiness`);
+    if (readyRes.ok) {
+      const ready = await readyRes.json();
+      console.log(`[doctor] readiness=${ready.ready ? 'ready' : 'not-ready'}`);
+    }
   } catch (err) {
     console.error(`[doctor] Unable to reach API at ${api}. Start backend first.`);
     process.exit(1);

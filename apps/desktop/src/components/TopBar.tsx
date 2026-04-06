@@ -53,11 +53,13 @@ export function TopBar() {
   });
 
   const degraded = health?.status === 'degraded';
+  const uiMode = (globalThis as any).__TAURI_INTERNALS__ ? 'desktop-ui' : 'web-ui';
 
   return (
     <header style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: 8, borderBottom: '1px solid #ddd', fontSize: 12, background: degraded ? '#fff6f6' : '#fafafa' }}>
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
         <strong>mode={health?.mode ?? '-'}</strong>
+        <span>ui={uiMode}</span>
         <span>env={health?.env ?? '-'}</span>
         <span>api={health?.status ?? 'unknown'}</span>
         <span>db={health?.checks?.database?.ok ? 'ok' : 'down'}</span>
