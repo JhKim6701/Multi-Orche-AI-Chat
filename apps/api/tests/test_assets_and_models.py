@@ -43,8 +43,10 @@ def test_retrieval_debug_endpoint_shape():
     assert preview.status_code == 200
     payload = preview.json()
     assert 'hits' in payload
+    assert 'scope' in payload
+    assert 'packed_meta' in payload
     if payload['hits']:
-        assert {'chunk_id', 'asset_id', 'score'}.issubset(payload['hits'][0].keys())
+        assert {'chunk_id', 'asset_id', 'score', 'vector_score', 'lexical_score', 'retrieval_mode'}.issubset(payload['hits'][0].keys())
 
 
 def test_model_toggle_and_sort(monkeypatch):

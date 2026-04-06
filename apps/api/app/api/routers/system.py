@@ -39,7 +39,7 @@ def _check_upload_root() -> tuple[bool, str]:
 
 
 @router.get("/health")
-async def health():
+async def health(client_mode: str | None = None):
     ollama = await OllamaClient().health_check()
     db_ok, db_msg = _check_db()
     upload_ok, upload_msg = _check_upload_root()
@@ -52,24 +52,36 @@ async def health():
         "upload_root": {"ok": upload_ok, "path": settings.upload_root, "detail": upload_msg},
     }
     overall = all(v.get("ok") for v in checks.values())
+    unresolved = [name for name, info in checks.items() if not info.get("ok")]
+    mode = "desktop" if settings.env == "desktop" else "web"
+    mode_mismatch = bool(client_mode and client_mode != mode)
     return {
         "status": "ok" if overall else "degraded",
         "app": settings.app_name,
         "env": settings.env,
-        "mode": "desktop" if settings.env == "desktop" else "web",
+        "mode": mode,
         "data_root": settings.data_root,
         "upload_root": settings.upload_root,
         "database_url": settings.database_url,
         "ollama_base_url": settings.ollama_base_url,
         "qdrant_url": settings.qdrant_url,
         "checks": checks,
+        "unresolved_dependencies": unresolved,
+        "mode_mismatch": mode_mismatch,
+        "doctor_hint": "npm run doctor로 health/readiness를 점검하세요.",
     }
 
 
 @router.get("/readiness")
 async def readiness():
     report = await health()
-    return {"ready": report["status"] == "ok", "checks": report["checks"], "env": report["env"]}
+    return {
+        "ready": report["status"] == "ok",
+        "checks": report["checks"],
+        "env": report["env"],
+        "unresolved_dependencies": report["unresolved_dependencies"],
+        "doctor_hint": report["doctor_hint"],
+    }
 
 
 @router.get("/runtime-info")

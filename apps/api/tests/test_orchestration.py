@@ -136,6 +136,26 @@ def test_orchestration_stream_payload_shape(monkeypatch):
     assert 'specialist_completed' in body or 'specialist_started' in body
 
 
+def test_orchestration_observability_shape(monkeypatch):
+    _seed_model(monkeypatch)
+    monkeypatch.setattr(OllamaClient, 'chat', _mock_chat)
+    p = client.post('/projects', json={'name': 'orch-obsv-p', 'description': None}).json()
+    c = client.post('/chats', json={'project_id': p['id'], 'title': 'orch-obsv-c'}).json()
+    run = client.post('/orchestration/run', json={
+        'project_id': p['id'],
+        'chat_thread_id': c['id'],
+        'content_markdown': 'observability shape',
+        'selected_model_names': ['orch-model']
+    })
+    assert run.status_code == 200
+    ob = client.get(f"/orchestration/runs/{run.json()['id']}/observability")
+    assert ob.status_code == 200
+    payload = ob.json()
+    assert 'steps' in payload
+    if payload['steps']:
+        assert {'step_id', 'step_name', 'assigned_role', 'retry_count', 'used_chunk_ids', 'duration_ms'}.issubset(payload['steps'][0].keys())
+
+
 def test_orchestration_reviewer_happy_path(monkeypatch):
     _seed_model(monkeypatch)
     monkeypatch.setattr(OllamaClient, 'chat', _mock_chat)

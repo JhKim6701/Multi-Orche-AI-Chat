@@ -9,7 +9,7 @@ from app.core.config import settings
 from app.db.session import get_db
 from app.models import Asset, AssetChunk, Message
 from app.schemas.asset import AssetOut
-from app.services.asset_ingestion import ingest_asset, retrieve_relevant_context
+from app.services.asset_ingestion import ingest_asset, pack_retrieval_context, retrieve_relevant_context
 from app.utils.files import safe_join, sanitize_filename
 
 router = APIRouter(prefix="/assets", tags=["assets"])
@@ -124,7 +124,19 @@ def retrieval_preview(chat_id: int, query: str, segment_id: int | None = None, l
         query=query,
         limit=min(max(limit, 1), 20),
     )
-    return {"query": query, "chat_thread_id": chat_id, "segment_id": segment_id, "hits": hits}
+    packed_context, packed_meta = pack_retrieval_context(hits)
+    return {
+        "query": query,
+        "scope": {
+            "project_id": project_id,
+            "chat_thread_id": chat_id,
+            "segment_id": segment_id,
+            "limit": min(max(limit, 1), 20),
+        },
+        "hits": hits,
+        "packed_context": packed_context,
+        "packed_meta": packed_meta,
+    }
 
 
 @router.get("/{asset_id}/download")

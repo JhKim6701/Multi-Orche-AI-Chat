@@ -8,6 +8,7 @@ from app.api.routers import assets, chats, messages, models, orchestration, proj
 from app.core.config import settings
 from app.db.base import Base
 from app.db.session import engine
+from app.services.failure_taxonomy import classify_failure, recovery_hint
 
 app = FastAPI(title="multi-orche-ai-chat-api")
 
@@ -25,13 +26,14 @@ if settings.auto_create_tables and settings.env == "dev":
 
 @app.exception_handler(RuntimeError)
 async def runtime_error_handler(_request: Request, exc: RuntimeError):
+    category = classify_failure(str(exc))
     return JSONResponse(
         status_code=500,
         content={
             "error": {
-                "code": "runtime_error",
+                "code": category,
                 "message": str(exc),
-                "recovery_hint": "환경변수/저장경로/의존성(Ollama,Qdrant)을 확인 후 다시 시도하세요.",
+                "recovery_hint": recovery_hint(category),
             }
         },
     )
@@ -40,13 +42,14 @@ async def runtime_error_handler(_request: Request, exc: RuntimeError):
 @app.exception_handler(HTTPException)
 async def http_exception_handler(_request: Request, exc: HTTPException):
     detail = exc.detail if isinstance(exc.detail, str) else "request failed"
+    category = classify_failure(detail)
     return JSONResponse(
         status_code=exc.status_code,
         content={
             "error": {
-                "code": f"http_{exc.status_code}",
+                "code": category if category != "runtime_error" else f"http_{exc.status_code}",
                 "message": detail,
-                "recovery_hint": "요청 파라미터/서비스 상태를 확인한 후 재시도하세요.",
+                "recovery_hint": recovery_hint(category),
             },
             "detail": detail,
         },

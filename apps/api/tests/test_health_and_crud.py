@@ -12,6 +12,8 @@ def test_health():
     assert payload['status'] in {'ok', 'degraded'}
     assert 'checks' in payload
     assert {'database', 'ollama', 'qdrant', 'upload_root'}.issubset(payload['checks'].keys())
+    assert 'unresolved_dependencies' in payload
+    assert 'doctor_hint' in payload
 
 
 def test_readiness_shape():
@@ -20,6 +22,7 @@ def test_readiness_shape():
     payload = r.json()
     assert 'ready' in payload
     assert 'checks' in payload
+    assert 'unresolved_dependencies' in payload
 
 
 def test_project_chat_message_flow():

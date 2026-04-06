@@ -63,6 +63,9 @@ type RetrievalHit = {
   snippet: string;
   score: number;
   retrieval_mode: string;
+  vector_score: number;
+  lexical_score: number;
+  ocr_fallback_used?: boolean;
 };
 
 export function ChatPanel() {
@@ -87,6 +90,7 @@ export function ChatPanel() {
   const [liveEvents, setLiveEvents] = useState<StreamEvent[]>([]);
   const [requireApprovalBeforePublish, setRequireApprovalBeforePublish] = useState(false);
   const [showRetrievalDebug, setShowRetrievalDebug] = useState(false);
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
 
   const queryScope = viewMode === 'segment' ? 'segment' : viewMode;
   const scopeQuery = viewMode === 'segment' && selectedSegmentId ? `&segment_id=${selectedSegmentId}` : '';
@@ -107,8 +111,14 @@ export function ChatPanel() {
   });
   const { data: retrievalPreview } = useQuery({
     queryKey: ['retrieval-preview', selectedChatId, selectedSegmentId, message],
-    queryFn: () => api.get<{ hits: RetrievalHit[] }>(`/assets/chat/${selectedChatId}/retrieval-preview?query=${encodeURIComponent(message)}${selectedSegmentId ? `&segment_id=${selectedSegmentId}` : ''}`),
+    queryFn: () => api.get<{ hits: RetrievalHit[]; packed_context: string; packed_meta: { retrieval_mode: string; used_chunk_ids: number[]; ocr_used: boolean }; scope: { project_id: number; chat_thread_id: number; segment_id?: number } }>(`/assets/chat/${selectedChatId}/retrieval-preview?query=${encodeURIComponent(message)}${selectedSegmentId ? `&segment_id=${selectedSegmentId}` : ''}`),
     enabled: !!selectedChatId && showRetrievalDebug && message.trim().length > 2,
+  });
+  const { data: diagnostics } = useQuery({
+    queryKey: ['diagnostics', selectedChatId],
+    queryFn: () => api.get<{ status: string; mode: string; unresolved_dependencies: string[]; data_root: string; upload_root: string; checks: Record<string, { ok: boolean }> }>('/system/health'),
+    enabled: showDiagnostics,
+    refetchInterval: 5000,
   });
 
   const { data: segments = [] } = useQuery({
@@ -450,6 +460,23 @@ export function ChatPanel() {
         ))}
       </section>
       <section style={{ border: '1px solid #eee', borderRadius: 6, padding: 8 }}>
+        <button type="button" style={{ fontSize: 12 }} onClick={() => setShowDiagnostics((v) => !v)}>
+          {showDiagnostics ? 'Hide' : 'Show'} Diagnostics
+        </button>
+        {showDiagnostics && (
+          <div style={{ marginTop: 6, fontSize: 11 }}>
+            <div>status={diagnostics?.status ?? '-'} · mode={diagnostics?.mode ?? '-'}</div>
+            <div>data_root={diagnostics?.data_root ?? '-'} · upload_root={diagnostics?.upload_root ?? '-'}</div>
+            <div>unresolved={(diagnostics?.unresolved_dependencies ?? []).join(', ') || 'none'}</div>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {Object.entries(diagnostics?.checks ?? {}).map(([k, v]) => (
+                <span key={k} style={{ background: v.ok ? '#ecfdf3' : '#fef3f2', padding: '2px 4px', borderRadius: 4 }}>{k}:{v.ok ? 'ok' : 'down'}</span>
+              ))}
+            </div>
+          </div>
+        )}
+      </section>
+      <section style={{ border: '1px solid #eee', borderRadius: 6, padding: 8 }}>
         <button type="button" style={{ fontSize: 12 }} onClick={() => setShowRetrievalDebug((v) => !v)}>
           {showRetrievalDebug ? 'Hide' : 'Show'} Retrieval Preview
         </button>
@@ -458,9 +485,16 @@ export function ChatPanel() {
             {(retrievalPreview?.hits ?? []).map((hit) => (
               <div key={hit.chunk_id} style={{ marginBottom: 4, borderBottom: '1px dashed #eee' }}>
                 asset#{hit.asset_id} {hit.filename} · chunk#{hit.chunk_id} idx={hit.chunk_index} page={hit.page ?? '-'} · score={hit.score}
+                <div>vector={hit.vector_score} · lexical={hit.lexical_score} · mode={hit.retrieval_mode} · ocr={String(hit.ocr_fallback_used ?? false)}</div>
                 <div>{hit.snippet}</div>
               </div>
             ))}
+            {!!retrievalPreview?.packed_context && (
+              <details>
+                <summary>packed context preview</summary>
+                <pre style={{ whiteSpace: 'pre-wrap' }}>{retrievalPreview.packed_context}</pre>
+              </details>
+            )}
             {(retrievalPreview?.hits ?? []).length === 0 && <small>No retrieval hits for current query.</small>}
           </div>
         )}
@@ -522,7 +556,7 @@ export function ChatPanel() {
                       <div><strong>{step.step_name}</strong> role={step.assigned_role} model={step.model_name ?? '-'}</div>
                       <div>input: {step.input_summary ?? '-'}</div>
                       <div>output: {step.output_summary ?? '-'}</div>
-                      <div>routing_reason: {step.routing_reason ?? '-'} · reviewer_decision: {step.reviewer_decision ?? '-'} · execution_mode: {step.execution_mode ?? '-'}</div>
+                      <div>routing_reason: {step.routing_reason ?? '-'} · reviewer_decision: {step.reviewer_decision ?? '-'} · execution_mode: {step.execution_mode ?? '-'} · duration={step.duration_ms ?? '-'}ms</div>
                       <div>used_asset_ids: {(step.used_asset_ids ?? []).join(', ') || '-'} · used_chunk_ids: {(step.used_chunk_ids ?? []).join(', ') || '-'} · image_asset_ids: {(step.image_asset_ids ?? []).join(', ') || '-'} · vision_used: {String(step.vision_used ?? false)}</div>
                       <div>used_segment: {step.used_segment_id ?? '-'} · parent_summary_used: {String(step.parent_segment_summary_used ?? false)} · retry={step.retry_count ?? 0} · fallback={step.fallback_model_name ?? '-'} ({step.fallback_reason ?? 'n/a'})</div>
                       <div>group={step.step_group ?? '-'} · depends_on={(step.depends_on_step_ids ?? []).join(', ') || '-'} · retrieval={step.retrieval_mode ?? '-'} · ocr={String(step.ocr_used ?? false)} · approval={step.approval_status ?? '-'}</div>

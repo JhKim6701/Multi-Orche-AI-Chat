@@ -38,6 +38,7 @@ class OrchestrationStepOut(BaseModel):
     status: str
     input_summary: str | None
     output_summary: str | None
+    duration_ms: int | None = None
     routing_reason: str | None = None
     reviewer_decision: str | None = None
     used_asset_ids: list[int] = Field(default_factory=list)

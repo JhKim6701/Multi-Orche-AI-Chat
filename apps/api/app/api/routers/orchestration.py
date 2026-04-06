@@ -181,6 +181,11 @@ def run_detail(run_id: int, db: Session = Depends(get_db)):
                 status=step.status,
                 input_summary=step.input_summary,
                 output_summary=_extract_meta(step.output_summary)[1],
+                duration_ms=(
+                    int((step.ended_at - step.started_at).total_seconds() * 1000)
+                    if step.started_at and step.ended_at
+                    else None
+                ),
                 routing_reason=_extract_meta(step.output_summary)[0].get("routing_reason"),
                 reviewer_decision=_extract_meta(step.output_summary)[0].get("reviewer_decision"),
                 used_asset_ids=_extract_meta(step.output_summary)[0].get("used_asset_ids", []),
@@ -216,6 +221,40 @@ def run_detail(run_id: int, db: Session = Depends(get_db)):
             else None
         ),
     )
+
+
+@router.get("/runs/{run_id}/observability")
+def run_observability(run_id: int, db: Session = Depends(get_db)):
+    run = db.get(OrchestrationRun, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="run not found")
+    steps = db.scalars(select(OrchestrationStep).where(OrchestrationStep.orchestration_run_id == run_id).order_by(OrchestrationStep.id.asc())).all()
+    summary = []
+    for step in steps:
+        meta, _ = _extract_meta(step.output_summary)
+        summary.append(
+            {
+                "run_id": run_id,
+                "step_id": step.id,
+                "step_name": step.step_name,
+                "assigned_role": step.assigned_role,
+                "status": step.status,
+                "model_name": step.model_name,
+                "duration_ms": int((step.ended_at - step.started_at).total_seconds() * 1000) if step.started_at and step.ended_at else None,
+                "retry_count": meta.get("retry_count", 0),
+                "fallback_model_name": meta.get("fallback_model_name"),
+                "approval_status": meta.get("approval_status"),
+                "used_asset_ids": meta.get("used_asset_ids", []),
+                "used_chunk_ids": meta.get("used_chunk_ids", []),
+                "used_segment_id": meta.get("used_segment_id"),
+            }
+        )
+    return {
+        "run_id": run_id,
+        "status": run.status,
+        "step_count": len(summary),
+        "steps": summary,
+    }
 
 
 @router.get("/runs/{run_id}/stream")

@@ -25,6 +25,8 @@ type Health = {
     qdrant: { ok: boolean };
     upload_root: { ok: boolean; path: string };
   };
+  unresolved_dependencies?: string[];
+  doctor_hint?: string;
 };
 
 type RuntimeInfo = {
@@ -82,7 +84,7 @@ export function TopBar() {
       </div>
       {degraded && (
         <div style={{ color: '#b42318', fontSize: 11 }}>
-          의존성 준비가 완료되지 않았습니다. Ollama/Qdrant/API 경로 설정을 확인하고 Retry checks를 눌러주세요.
+          의존성 준비가 완료되지 않았습니다. unresolved={(health?.unresolved_dependencies ?? []).join(', ') || 'none'} · {health?.doctor_hint ?? 'npm run doctor로 점검하세요.'}
         </div>
       )}
     </header>
