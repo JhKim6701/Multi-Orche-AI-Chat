@@ -1,25 +1,23 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from app.core.config import settings
+from app.services.state_store import AtomicJsonFileStore
 
 _STATE_FILE = Path(settings.runtime_state_file)
+_STORE = AtomicJsonFileStore(_STATE_FILE, default_data={"gpu_enabled": True})
 
 
 def _load_state() -> dict:
-    if not _STATE_FILE.exists():
-        return {"gpu_enabled": True}
-    try:
-        return json.loads(_STATE_FILE.read_text(encoding="utf-8"))
-    except Exception:
-        return {"gpu_enabled": True}
+    state = _STORE.load()
+    if "gpu_enabled" not in state:
+        state["gpu_enabled"] = True
+    return state
 
 
 def _save_state(state: dict) -> None:
-    _STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    _STATE_FILE.write_text(json.dumps(state), encoding="utf-8")
+    _STORE.save(state)
 
 
 def get_gpu_enabled() -> bool:
@@ -27,7 +25,11 @@ def get_gpu_enabled() -> bool:
 
 
 def set_gpu_enabled(enabled: bool) -> bool:
-    state = _load_state()
-    state["gpu_enabled"] = bool(enabled)
-    _save_state(state)
-    return bool(state["gpu_enabled"])
+    target = bool(enabled)
+
+    def _mutate(state: dict) -> dict:
+        state["gpu_enabled"] = target
+        return state
+
+    updated = _STORE.update(_mutate)
+    return bool(updated.get("gpu_enabled", True))

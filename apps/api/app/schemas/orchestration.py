@@ -58,6 +58,7 @@ class OrchestrationStepOut(BaseModel):
     ocr_used: bool | None = None
     approval_required: bool | None = None
     approval_status: str | None = None
+    step_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class OrchestrationRunDetail(BaseModel):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter
 from pydantic import BaseModel
@@ -38,33 +39,71 @@ def _check_upload_root() -> tuple[bool, str]:
         return False, str(exc)
 
 
+def _mask_path(path: str, reveal: bool) -> str:
+    if reveal:
+        return path
+    p = Path(path)
+    return f".../{p.name}" if p.name else "..."
+
+
+def _mask_url(raw: str, reveal: bool) -> str:
+    if reveal:
+        return raw
+    parts = urlsplit(raw)
+    host = parts.hostname or "unknown"
+    scheme = parts.scheme or ""
+    port = f":{parts.port}" if parts.port else ""
+    path_tail = parts.path.rsplit("/", 1)[-1] if parts.path else ""
+    suffix = f"/{path_tail}" if path_tail else ""
+    if parts.username:
+        return f"{scheme}://***@{host}{port}{suffix}"
+    return f"{scheme}://{host}{port}{suffix}" if scheme else raw
+
+
+def _allow_sensitive(verbose: bool) -> bool:
+    return settings.env == "dev" and verbose
+
+
+def _runtime_surface(verbose: bool) -> dict:
+    reveal = _allow_sensitive(verbose)
+    return {
+        "env": settings.env,
+        "mode": "desktop" if settings.env == "desktop" else "web",
+        "gpu_enabled": get_gpu_enabled(),
+        "data_root": _mask_path(settings.data_root, reveal),
+        "upload_root": _mask_path(settings.upload_root, reveal),
+        "database_url": _mask_url(settings.database_url, reveal),
+        "qdrant_url": _mask_url(settings.qdrant_url, reveal),
+        "ollama_base_url": _mask_url(settings.ollama_base_url, reveal),
+        "sensitive_details_included": reveal,
+    }
+
+
 @router.get("/health")
-async def health(client_mode: str | None = None):
+async def health(client_mode: str | None = None, verbose: bool = False):
     ollama = await OllamaClient().health_check()
     db_ok, db_msg = _check_db()
     upload_ok, upload_msg = _check_upload_root()
     qdrant_ok = QdrantStore().health()
+    runtime = _runtime_surface(verbose=verbose)
 
     checks = {
-        "database": {"ok": db_ok, "detail": db_msg},
+        "database": {"ok": db_ok, "detail": db_msg if runtime["sensitive_details_included"] else ("ok" if db_ok else "error")},
         "ollama": {"ok": ollama},
         "qdrant": {"ok": qdrant_ok},
-        "upload_root": {"ok": upload_ok, "path": settings.upload_root, "detail": upload_msg},
+        "upload_root": {
+            "ok": upload_ok,
+            "path": runtime["upload_root"],
+            "detail": upload_msg if runtime["sensitive_details_included"] else ("ok" if upload_ok else "error"),
+        },
     }
     overall = all(v.get("ok") for v in checks.values())
     unresolved = [name for name, info in checks.items() if not info.get("ok")]
-    mode = "desktop" if settings.env == "desktop" else "web"
-    mode_mismatch = bool(client_mode and client_mode != mode)
+    mode_mismatch = bool(client_mode and client_mode != runtime["mode"])
     return {
         "status": "ok" if overall else "degraded",
         "app": settings.app_name,
-        "env": settings.env,
-        "mode": mode,
-        "data_root": settings.data_root,
-        "upload_root": settings.upload_root,
-        "database_url": settings.database_url,
-        "ollama_base_url": settings.ollama_base_url,
-        "qdrant_url": settings.qdrant_url,
+        **runtime,
         "checks": checks,
         "unresolved_dependencies": unresolved,
         "mode_mismatch": mode_mismatch,
@@ -73,29 +112,21 @@ async def health(client_mode: str | None = None):
 
 
 @router.get("/readiness")
-async def readiness():
-    report = await health()
+async def readiness(verbose: bool = False):
+    report = await health(verbose=verbose)
     return {
         "ready": report["status"] == "ok",
         "checks": report["checks"],
         "env": report["env"],
         "unresolved_dependencies": report["unresolved_dependencies"],
         "doctor_hint": report["doctor_hint"],
+        "sensitive_details_included": report["sensitive_details_included"],
     }
 
 
 @router.get("/runtime-info")
-def runtime_info():
-    return {
-        "env": settings.env,
-        "mode": "desktop" if settings.env == "desktop" else "web",
-        "data_root": settings.data_root,
-        "upload_root": settings.upload_root,
-        "database_url": settings.database_url,
-        "qdrant_url": settings.qdrant_url,
-        "ollama_base_url": settings.ollama_base_url,
-        "gpu_enabled": get_gpu_enabled(),
-    }
+def runtime_info(verbose: bool = False):
+    return _runtime_surface(verbose=verbose)
 
 
 @router.get("/hardware")
@@ -119,6 +150,7 @@ def set_gpu_state(payload: GpuToggleRequest):
 
 
 @router.get("/ollama")
-async def ollama_connectivity():
+async def ollama_connectivity(verbose: bool = False):
     client = OllamaClient()
-    return {"connected": await client.health_check(), "base_url": settings.ollama_base_url}
+    runtime = _runtime_surface(verbose=verbose)
+    return {"connected": await client.health_check(), "base_url": runtime["ollama_base_url"], "sensitive_details_included": runtime["sensitive_details_included"]}

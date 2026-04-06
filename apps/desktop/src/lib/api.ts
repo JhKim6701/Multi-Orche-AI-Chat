@@ -5,14 +5,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!res.ok) {
     let detail = res.statusText;
     let hint = '';
+    let code = '';
     try {
       const payload = await res.json();
       detail = payload.detail ?? payload.error?.message ?? detail;
+      code = payload.error?.code ? `[${payload.error.code}] ` : '';
       hint = payload.error?.recovery_hint ? `\n복구 안내: ${payload.error.recovery_hint}` : '';
     } catch {
       // ignore
     }
-    throw new Error((detail || 'request failed') + hint);
+    throw new Error(code + (detail || 'request failed') + hint);
   }
   return res.json() as Promise<T>;
 }

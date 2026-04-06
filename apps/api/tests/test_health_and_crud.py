@@ -25,6 +25,21 @@ def test_readiness_shape():
     assert 'unresolved_dependencies' in payload
 
 
+def test_diagnostics_masking():
+    health = client.get('/system/health')
+    assert health.status_code == 200
+    payload = health.json()
+    assert payload['sensitive_details_included'] is False
+    assert payload['database_url'] != payload.get('upload_root')
+    assert '...' in payload['upload_root'] or payload['upload_root'].startswith('/')
+
+    runtime_info = client.get('/system/runtime-info')
+    assert runtime_info.status_code == 200
+    info = runtime_info.json()
+    assert info['sensitive_details_included'] is False
+    assert '***' in info['database_url'] or 'localhost' in info['database_url']
+
+
 def test_project_chat_message_flow():
     p = client.post('/projects', json={'name': 'demo', 'description': 'd'})
     assert p.status_code == 200

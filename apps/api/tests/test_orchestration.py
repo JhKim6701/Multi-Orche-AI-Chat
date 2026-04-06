@@ -1,6 +1,8 @@
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.db.session import SessionLocal
+from app.models import OrchestrationStep
 from app.services.ollama_client import OllamaClient
 
 client = TestClient(app)
@@ -293,6 +295,9 @@ def test_approval_pending_approve_reject(monkeypatch):
     assert approve.status_code == 200
     detail2 = client.get(f'/orchestration/runs/{run_id}').json()
     assert detail2['run']['final_publish_status'] == 'published'
+    assert detail2['final_message'] is not None
+    assert detail2['run']['generated_artifact_ids']
+    assert '[Generated artifact]' in detail2['final_message']['content_markdown']
 
     run2 = client.post('/orchestration/run', json={
         'project_id': p['id'],
@@ -306,3 +311,105 @@ def test_approval_pending_approve_reject(monkeypatch):
     assert reject.status_code == 200
     detail3 = client.get(f'/orchestration/runs/{run2_id}').json()
     assert detail3['run']['approval_status'] == 'rejected'
+
+
+def test_approval_sequence_integrity(monkeypatch):
+    _seed_model(monkeypatch)
+    monkeypatch.setattr(OllamaClient, 'chat', _mock_chat)
+    p = client.post('/projects', json={'name': 'orch-seq-p', 'description': None}).json()
+    c = client.post('/chats', json={'project_id': p['id'], 'title': 'orch-seq-c'}).json()
+
+    run = client.post('/orchestration/run', json={
+        'project_id': p['id'],
+        'chat_thread_id': c['id'],
+        'content_markdown': 'needs approval for seq',
+        'selected_model_names': ['orch-model'],
+        'require_approval_before_publish': True,
+    })
+    run_id = run.json()['id']
+
+    another = client.post('/messages', json={'project_id': p['id'], 'chat_thread_id': c['id'], 'content_markdown': 'concurrent message'})
+    assert another.status_code == 200
+
+    approve = client.post(f'/orchestration/runs/{run_id}/approve')
+    assert approve.status_code == 200
+
+    timeline = client.get(f"/messages?chat_thread_id={c['id']}&scope=all").json()['items']
+    sequence = [m['sequence_no'] for m in timeline]
+    assert sequence == sorted(sequence)
+    assert len(sequence) == len(set(sequence))
+    assert timeline[-1]['role'] == 'assistant'
+
+
+def test_duplicate_approve_handling(monkeypatch):
+    _seed_model(monkeypatch)
+    monkeypatch.setattr(OllamaClient, 'chat', _mock_chat)
+    p = client.post('/projects', json={'name': 'orch-dup-approve-p', 'description': None}).json()
+    c = client.post('/chats', json={'project_id': p['id'], 'title': 'orch-dup-approve-c'}).json()
+    run = client.post('/orchestration/run', json={
+        'project_id': p['id'],
+        'chat_thread_id': c['id'],
+        'content_markdown': 'duplicate approve',
+        'selected_model_names': ['orch-model'],
+        'require_approval_before_publish': True,
+    })
+    run_id = run.json()['id']
+    first = client.post(f'/orchestration/runs/{run_id}/approve')
+    second = client.post(f'/orchestration/runs/{run_id}/approve')
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()['final_message_id'] == second.json()['final_message_id']
+    assert second.json()['idempotent'] is True
+
+
+def test_reject_consistency_duplicate(monkeypatch):
+    _seed_model(monkeypatch)
+    monkeypatch.setattr(OllamaClient, 'chat', _mock_chat)
+    p = client.post('/projects', json={'name': 'orch-reject-consistency-p', 'description': None}).json()
+    c = client.post('/chats', json={'project_id': p['id'], 'title': 'orch-reject-consistency-c'}).json()
+    run = client.post('/orchestration/run', json={
+        'project_id': p['id'],
+        'chat_thread_id': c['id'],
+        'content_markdown': 'reject consistency',
+        'selected_model_names': ['orch-model'],
+        'require_approval_before_publish': True,
+    })
+    run_id = run.json()['id']
+    first = client.post(f'/orchestration/runs/{run_id}/reject')
+    second = client.post(f'/orchestration/runs/{run_id}/reject')
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()['idempotent'] is True
+    detail = client.get(f'/orchestration/runs/{run_id}').json()
+    assert detail['run']['status'] == 'rejected'
+    assert detail['final_message'] is None
+
+
+def test_structured_step_metadata_compatibility(monkeypatch):
+    _seed_model(monkeypatch)
+    monkeypatch.setattr(OllamaClient, 'chat', _mock_chat)
+    p = client.post('/projects', json={'name': 'orch-meta-compat-p', 'description': None}).json()
+    c = client.post('/chats', json={'project_id': p['id'], 'title': 'orch-meta-compat-c'}).json()
+    run = client.post('/orchestration/run', json={
+        'project_id': p['id'],
+        'chat_thread_id': c['id'],
+        'content_markdown': 'meta compatibility',
+        'selected_model_names': ['orch-model'],
+    })
+    run_id = run.json()['id']
+    detail = client.get(f'/orchestration/runs/{run_id}').json()
+    assert all(isinstance(step.get('step_metadata'), dict) for step in detail['steps'])
+
+    db = SessionLocal()
+    try:
+        legacy_step = db.query(OrchestrationStep).filter(OrchestrationStep.orchestration_run_id == run_id).first()
+        assert legacy_step is not None
+        legacy_step.step_metadata_json = None
+        legacy_step.output_summary = '[meta]{\"routing_reason\":\"legacy-route\",\"used_asset_ids\":[1]}[/meta]\\nlegacy text'
+        db.commit()
+    finally:
+        db.close()
+
+    detail2 = client.get(f'/orchestration/runs/{run_id}').json()
+    first_step = detail2['steps'][0]
+    assert first_step['routing_reason'] == 'legacy-route'

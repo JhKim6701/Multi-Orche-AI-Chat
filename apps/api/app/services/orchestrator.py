@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import json
 import base64
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -68,11 +68,6 @@ def _summarize(text: str, limit: int = 220) -> str:
     return cleaned[:limit]
 
 
-def _pack_summary(text: str, meta: dict, limit: int = 700) -> str:
-    payload = f"[meta]{json.dumps(meta, ensure_ascii=False)}[/meta]\n{text}"
-    return _summarize(payload, limit=limit)
-
-
 def _review_decision(text: str) -> str:
     lowered = text.lower()
     if "append_missing_points" in lowered:
@@ -92,6 +87,58 @@ def _encode_image_assets(assets: list[Asset]) -> tuple[list[str], list[int]]:
         images.append(base64.b64encode(raw).decode("utf-8"))
         image_ids.append(asset.id)
     return images, image_ids
+
+
+def _step_output(text: str) -> str:
+    return _summarize(text, limit=700)
+
+
+def _build_step_metadata(**kwargs: Any) -> dict[str, Any]:
+    return kwargs
+
+
+def publish_final_message_from_payload(
+    db: Session,
+    run: OrchestrationRun,
+    payload: dict[str, Any],
+) -> Message:
+    chat_thread_id = int(payload["chat_thread_id"])
+    max_seq = db.scalar(select(func.max(Message.sequence_no)).where(Message.chat_thread_id == chat_thread_id)) or 0
+    final_text = str(payload["content_markdown"])
+    final_message = Message(
+        project_id=int(payload["project_id"]),
+        chat_thread_id=chat_thread_id,
+        segment_id=int(payload["segment_id"]),
+        role=RoleEnum.assistant,
+        content_markdown=final_text,
+        plain_text_cache=final_text,
+        sequence_no=max_seq + 1,
+        model_name=payload.get("model_name"),
+        model_role=payload.get("model_role"),
+    )
+    db.add(final_message)
+    db.flush()
+
+    generated_artifact = create_ai_generated_artifact(
+        db,
+        project_id=int(payload["project_id"]),
+        chat_thread_id=chat_thread_id,
+        message_id=final_message.id,
+        content=final_text,
+        model_name=payload.get("model_name"),
+        model_role=payload.get("model_role"),
+        orchestration_run_id=run.id,
+    )
+    final_message.content_markdown = (
+        f"{final_message.content_markdown}\n"
+        f"[Generated artifact] #{generated_artifact.id}:{generated_artifact.original_filename}"
+    )
+    final_message.plain_text_cache = final_message.content_markdown
+    run.final_message_id = final_message.id
+    run.status = "completed"
+    run.ended_at = datetime.utcnow()
+    update_segment_summary(db, int(payload["segment_id"]))
+    return final_message
 
 
 async def execute_orchestration(
@@ -255,28 +302,26 @@ async def execute_orchestration(
                 else:
                     output = "(empty)"
             step.status = "completed"
-            step.output_summary = _pack_summary(
-                output,
-                {
-                    "routing_reason": routing_reason,
-                    "gpu_enabled": gpu_enabled,
-                    "used_asset_ids": used_asset_ids,
-                    "image_asset_ids": image_asset_ids,
-                    "used_chunk_ids": used_chunk_ids,
-                    "retrieval_mode": retrieval_meta.get("retrieval_mode"),
-                    "ocr_used": retrieval_meta.get("ocr_used"),
-                    "vision_used": has_image,
-                    "used_segment_id": segment.id,
-                    "parent_segment_summary_used": parent_summary_used,
-                    "step_group": graph_groups.get(plan.name, "sequential"),
-                    "depends_on_step_ids": depends,
-                    "execution_mode": "parallel_candidate" if plan.name in {"context_resolver", "specialist_analyzer"} else "sequential",
-                    "retry_count": retry_count,
-                    "fallback_model_name": fallback_model_name,
-                    "fallback_reason": fallback_reason,
-                    "approval_required": require_approval_before_publish,
-                    "approval_status": "not_required" if not require_approval_before_publish else "pending",
-                },
+            step.output_summary = _step_output(output)
+            step.step_metadata_json = _build_step_metadata(
+                routing_reason=routing_reason,
+                gpu_enabled=gpu_enabled,
+                used_asset_ids=used_asset_ids,
+                image_asset_ids=image_asset_ids,
+                used_chunk_ids=used_chunk_ids,
+                retrieval_mode=retrieval_meta.get("retrieval_mode"),
+                ocr_used=retrieval_meta.get("ocr_used"),
+                vision_used=has_image,
+                used_segment_id=segment.id,
+                parent_segment_summary_used=parent_summary_used,
+                step_group=graph_groups.get(plan.name, "sequential"),
+                depends_on_step_ids=depends,
+                execution_mode="parallel_candidate" if plan.name in {"context_resolver", "specialist_analyzer"} else "sequential",
+                retry_count=retry_count,
+                fallback_model_name=fallback_model_name,
+                fallback_reason=fallback_reason,
+                approval_required=require_approval_before_publish,
+                approval_status="not_required" if not require_approval_before_publish else "pending",
             )
             step.ended_at = datetime.utcnow()
             step.retry_count = retry_count
@@ -315,27 +360,25 @@ async def execute_orchestration(
             final_text = f"{final_text}\n\n[Used assets] {src}"
 
         final_step.status = "completed"
-        final_step.output_summary = _pack_summary(
-            final_text,
-                {
-                    "routing_reason": routing_reason,
-                    "used_asset_ids": used_asset_ids,
-                    "image_asset_ids": image_asset_ids,
-                    "used_chunk_ids": used_chunk_ids,
-                    "retrieval_mode": retrieval_meta.get("retrieval_mode"),
-                    "ocr_used": retrieval_meta.get("ocr_used"),
-                    "vision_used": bool(image_payloads and can_use_vision),
-                    "used_segment_id": segment.id,
-                    "parent_segment_summary_used": parent_summary_used,
-                    "step_group": "response",
-                    "depends_on_step_ids": [sid for sid in [step_id_map.get("model_router")] if sid],
-                    "execution_mode": "sequential",
-                    "retry_count": 0,
-                    "fallback_model_name": None,
-                    "approval_required": require_approval_before_publish,
-                    "approval_status": "pending" if require_approval_before_publish else "not_required",
-                },
-            )
+        final_step.output_summary = _step_output(final_text)
+        final_step.step_metadata_json = _build_step_metadata(
+            routing_reason=routing_reason,
+            used_asset_ids=used_asset_ids,
+            image_asset_ids=image_asset_ids,
+            used_chunk_ids=used_chunk_ids,
+            retrieval_mode=retrieval_meta.get("retrieval_mode"),
+            ocr_used=retrieval_meta.get("ocr_used"),
+            vision_used=bool(image_payloads and can_use_vision),
+            used_segment_id=segment.id,
+            parent_segment_summary_used=parent_summary_used,
+            step_group="response",
+            depends_on_step_ids=[sid for sid in [step_id_map.get("model_router")] if sid],
+            execution_mode="sequential",
+            retry_count=0,
+            fallback_model_name=None,
+            approval_required=require_approval_before_publish,
+            approval_status="pending" if require_approval_before_publish else "not_required",
+        )
         final_step.ended_at = datetime.utcnow()
 
         review_prompt = (
@@ -361,29 +404,27 @@ async def execute_orchestration(
         review_text = review_resp.get("message", {}).get("content") or "decision: approve"
         reviewer_decision = _review_decision(review_text)
         reviewer_step.status = "completed"
-        reviewer_step.output_summary = _pack_summary(
-            review_text,
-                {
-                "routing_reason": routing_reason,
-                "gpu_enabled": gpu_enabled,
-                "reviewer_decision": reviewer_decision,
-                    "used_asset_ids": used_asset_ids,
-                    "image_asset_ids": image_asset_ids,
-                    "used_chunk_ids": used_chunk_ids,
-                    "retrieval_mode": retrieval_meta.get("retrieval_mode"),
-                    "ocr_used": retrieval_meta.get("ocr_used"),
-                    "vision_used": bool(image_payloads and can_use_vision),
-                    "used_segment_id": segment.id,
-                    "parent_segment_summary_used": parent_summary_used,
-                    "step_group": "quality_gate",
-                    "depends_on_step_ids": [step_id_map.get("final_responder")] if step_id_map.get("final_responder") else [],
-                    "execution_mode": "sequential",
-                    "retry_count": 0,
-                    "fallback_model_name": None,
-                    "approval_required": require_approval_before_publish,
-                    "approval_status": "pending" if require_approval_before_publish else "not_required",
-                },
-            )
+        reviewer_step.output_summary = _step_output(review_text)
+        reviewer_step.step_metadata_json = _build_step_metadata(
+            routing_reason=routing_reason,
+            gpu_enabled=gpu_enabled,
+            reviewer_decision=reviewer_decision,
+            used_asset_ids=used_asset_ids,
+            image_asset_ids=image_asset_ids,
+            used_chunk_ids=used_chunk_ids,
+            retrieval_mode=retrieval_meta.get("retrieval_mode"),
+            ocr_used=retrieval_meta.get("ocr_used"),
+            vision_used=bool(image_payloads and can_use_vision),
+            used_segment_id=segment.id,
+            parent_segment_summary_used=parent_summary_used,
+            step_group="quality_gate",
+            depends_on_step_ids=[step_id_map.get("final_responder")] if step_id_map.get("final_responder") else [],
+            execution_mode="sequential",
+            retry_count=0,
+            fallback_model_name=None,
+            approval_required=require_approval_before_publish,
+            approval_status="pending" if require_approval_before_publish else "not_required",
+        )
         reviewer_step.ended_at = datetime.utcnow()
 
         revised = False
@@ -422,27 +463,25 @@ async def execute_orchestration(
         critic_resp = await client.chat(model_name=critic_model, messages=[{"role": "user", "content": critic_prompt}])
         critic_text = critic_resp.get("message", {}).get("content") or "(critic empty)"
         critic_step.status = "completed"
-        critic_step.output_summary = _pack_summary(
-            critic_text,
-            {
-                "routing_reason": f"{routing_reason}+critic_reason={critic_reason}",
-                "gpu_enabled": gpu_enabled,
-                "used_asset_ids": used_asset_ids,
-                "image_asset_ids": image_asset_ids,
-                "used_chunk_ids": used_chunk_ids,
-                "retrieval_mode": retrieval_meta.get("retrieval_mode"),
-                "ocr_used": retrieval_meta.get("ocr_used"),
-                "vision_used": bool(image_payloads and can_use_vision),
-                "used_segment_id": segment.id,
-                "parent_segment_summary_used": parent_summary_used,
-                "step_group": "quality_gate",
-                "depends_on_step_ids": [step_id_map.get("final_responder")] if step_id_map.get("final_responder") else [],
-                "execution_mode": "sequential",
-                "retry_count": 0,
-                "fallback_model_name": None,
-                "approval_required": require_approval_before_publish,
-                "approval_status": "pending" if require_approval_before_publish else "not_required",
-            },
+        critic_step.output_summary = _step_output(critic_text)
+        critic_step.step_metadata_json = _build_step_metadata(
+            routing_reason=f"{routing_reason}+critic_reason={critic_reason}",
+            gpu_enabled=gpu_enabled,
+            used_asset_ids=used_asset_ids,
+            image_asset_ids=image_asset_ids,
+            used_chunk_ids=used_chunk_ids,
+            retrieval_mode=retrieval_meta.get("retrieval_mode"),
+            ocr_used=retrieval_meta.get("ocr_used"),
+            vision_used=bool(image_payloads and can_use_vision),
+            used_segment_id=segment.id,
+            parent_segment_summary_used=parent_summary_used,
+            step_group="quality_gate",
+            depends_on_step_ids=[step_id_map.get("final_responder")] if step_id_map.get("final_responder") else [],
+            execution_mode="sequential",
+            retry_count=0,
+            fallback_model_name=None,
+            approval_required=require_approval_before_publish,
+            approval_status="pending" if require_approval_before_publish else "not_required",
         )
         critic_step.ended_at = datetime.utcnow()
 
@@ -475,29 +514,27 @@ async def execute_orchestration(
             final_text = revised_text
             revised = True
             revision_step.status = "completed"
-            revision_step.output_summary = _pack_summary(
-                revised_text,
-                {
-                    "routing_reason": routing_reason,
-                    "gpu_enabled": gpu_enabled,
-                    "reviewer_decision": reviewer_decision,
-                    "used_asset_ids": used_asset_ids,
-                    "image_asset_ids": image_asset_ids,
-                    "used_chunk_ids": used_chunk_ids,
-                    "retrieval_mode": retrieval_meta.get("retrieval_mode"),
-                    "ocr_used": retrieval_meta.get("ocr_used"),
-                    "vision_used": bool(image_payloads and can_use_vision),
-                    "used_segment_id": segment.id,
-                    "parent_segment_summary_used": parent_summary_used,
-                    "revision_applied": True,
-                    "step_group": "quality_gate",
-                    "depends_on_step_ids": [reviewer_step.id, critic_step.id],
-                    "execution_mode": "sequential",
-                    "retry_count": 0,
-                    "fallback_model_name": None,
-                    "approval_required": require_approval_before_publish,
-                    "approval_status": "pending" if require_approval_before_publish else "not_required",
-                },
+            revision_step.output_summary = _step_output(revised_text)
+            revision_step.step_metadata_json = _build_step_metadata(
+                routing_reason=routing_reason,
+                gpu_enabled=gpu_enabled,
+                reviewer_decision=reviewer_decision,
+                used_asset_ids=used_asset_ids,
+                image_asset_ids=image_asset_ids,
+                used_chunk_ids=used_chunk_ids,
+                retrieval_mode=retrieval_meta.get("retrieval_mode"),
+                ocr_used=retrieval_meta.get("ocr_used"),
+                vision_used=bool(image_payloads and can_use_vision),
+                used_segment_id=segment.id,
+                parent_segment_summary_used=parent_summary_used,
+                revision_applied=True,
+                step_group="quality_gate",
+                depends_on_step_ids=[reviewer_step.id, critic_step.id],
+                execution_mode="sequential",
+                retry_count=0,
+                fallback_model_name=None,
+                approval_required=require_approval_before_publish,
+                approval_status="pending" if require_approval_before_publish else "not_required",
             )
             revision_step.ended_at = datetime.utcnow()
 
@@ -519,45 +556,27 @@ async def execute_orchestration(
                     "content_markdown": final_text,
                     "model_name": model_name,
                     "model_role": "final_responder_revised" if revised else "final_responder",
-                    "sequence_no": max_seq + 2,
                     "approval_status": "pending",
                 },
             )
             run.status = "approval_pending"
+            run.ended_at = None
         else:
-            final_message = Message(
-                project_id=project_id,
-                chat_thread_id=chat_thread_id,
-                segment_id=segment.id,
-                role=RoleEnum.assistant,
-                content_markdown=final_text,
-                plain_text_cache=final_text,
-                sequence_no=max_seq + 2,
-                model_name=model_name,
-                model_role="final_responder_revised" if revised else "final_responder",
+            publish_final_message_from_payload(
+                db=db,
+                run=run,
+                payload={
+                    "project_id": project_id,
+                    "chat_thread_id": chat_thread_id,
+                    "segment_id": segment.id,
+                    "content_markdown": final_text,
+                    "model_name": model_name,
+                    "model_role": "final_responder_revised" if revised else "final_responder",
+                },
             )
-            db.add(final_message)
-            db.flush()
-            generated_artifact = create_ai_generated_artifact(
-                db,
-                project_id=project_id,
-                chat_thread_id=chat_thread_id,
-                message_id=final_message.id,
-                content=final_text,
-                model_name=model_name,
-                model_role=final_message.model_role,
-                orchestration_run_id=run.id,
-            )
-            final_message.content_markdown = (
-                f"{final_message.content_markdown}\n"
-                f"[Generated artifact] #{generated_artifact.id}:{generated_artifact.original_filename}"
-            )
-            final_message.plain_text_cache = final_message.content_markdown
-            run.final_message_id = final_message.id
-            run.status = "completed"
-            update_segment_summary(db, segment.id)
 
-        run.ended_at = datetime.utcnow()
+        if run.status != "approval_pending":
+            run.ended_at = datetime.utcnow()
         db.commit()
         db.refresh(run)
         return run

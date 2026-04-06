@@ -91,6 +91,7 @@ export function ChatPanel() {
   const [requireApprovalBeforePublish, setRequireApprovalBeforePublish] = useState(false);
   const [showRetrievalDebug, setShowRetrievalDebug] = useState(false);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [showDiagnosticsVerbose, setShowDiagnosticsVerbose] = useState(false);
 
   const queryScope = viewMode === 'segment' ? 'segment' : viewMode;
   const scopeQuery = viewMode === 'segment' && selectedSegmentId ? `&segment_id=${selectedSegmentId}` : '';
@@ -115,8 +116,8 @@ export function ChatPanel() {
     enabled: !!selectedChatId && showRetrievalDebug && message.trim().length > 2,
   });
   const { data: diagnostics } = useQuery({
-    queryKey: ['diagnostics', selectedChatId],
-    queryFn: () => api.get<{ status: string; mode: string; unresolved_dependencies: string[]; data_root: string; upload_root: string; checks: Record<string, { ok: boolean }> }>('/system/health'),
+    queryKey: ['diagnostics', selectedChatId, showDiagnosticsVerbose],
+    queryFn: () => api.get<{ status: string; mode: string; unresolved_dependencies: string[]; data_root: string; upload_root: string; checks: Record<string, { ok: boolean }>; sensitive_details_included: boolean; database_url: string; ollama_base_url: string; qdrant_url: string }>(`/system/health?verbose=${showDiagnosticsVerbose}`),
     enabled: showDiagnostics,
     refetchInterval: 5000,
   });
@@ -269,6 +270,8 @@ export function ChatPanel() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['orchestration-run-detail', selectedRunId] });
       qc.invalidateQueries({ queryKey: ['messages', selectedChatId] });
+      qc.invalidateQueries({ queryKey: ['assets', selectedChatId] });
+      qc.invalidateQueries({ queryKey: ['orchestration-runs', selectedChatId] });
     }
   });
   const rejectRunMutation = useMutation({
@@ -276,6 +279,7 @@ export function ChatPanel() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['orchestration-run-detail', selectedRunId] });
       qc.invalidateQueries({ queryKey: ['messages', selectedChatId] });
+      qc.invalidateQueries({ queryKey: ['orchestration-runs', selectedChatId] });
     }
   });
 
@@ -345,13 +349,18 @@ export function ChatPanel() {
   const visionPending = file?.type?.startsWith('image/') ?? false;
   const surfaceError = (manualRunMutation.error || orchestrateMutation.error || branchMutation.error || switchSegment.error) as Error | null;
   const errorText = (surfaceError?.message ?? '').toLowerCase();
-  const recoveryHint = errorText.includes('ollama')
-    ? 'Ollama가 실행 중인지 확인 후 다시 시도하세요.'
-    : errorText.includes('qdrant')
-      ? 'Qdrant 연결을 확인하거나 retrieval fallback 상태를 확인하세요.'
-      : errorText.includes('upload') || errorText.includes('write')
-        ? '업로드/데이터 경로 권한을 확인하세요.'
-        : '시스템 상태 배너를 확인하고 다시 시도하세요.';
+  const errorCode = (surfaceError?.message.match(/\[([^\]]+)\]/)?.[1] ?? '').toLowerCase();
+  const recoveryHintByCode: Record<string, string> = {
+    ollama_unavailable: 'Ollama 서버가 내려가 있거나 base URL이 잘못됐습니다. 서비스 상태를 확인하세요.',
+    qdrant_unavailable: 'Qdrant 연결 문제입니다. Docker/endpoint 및 인덱스 상태를 점검하세요.',
+    approval_state_inconsistent: '승인 상태 불일치입니다. Run detail 새로고침 후 approve/reject를 다시 시도하세요.',
+    desktop_runtime_misconfigured: 'Desktop 모드 설정이 어긋났습니다. doctor 실행 후 runtime-info를 재확인하세요.',
+    routing_fallback: '모델 capabilities와 enabled/downloaded 상태를 점검하세요.',
+  };
+  const recoveryHint = recoveryHintByCode[errorCode]
+    ?? (errorText.includes('upload') || errorText.includes('write')
+      ? '업로드/데이터 경로 권한을 확인하세요.'
+      : '시스템 상태 배너를 확인하고 다시 시도하세요.');
 
   const divergenceLabel = useMemo(() => {
     if (!divergence) return '';
@@ -465,8 +474,14 @@ export function ChatPanel() {
         </button>
         {showDiagnostics && (
           <div style={{ marginTop: 6, fontSize: 11 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4 }}>
+              <input type="checkbox" checked={showDiagnosticsVerbose} onChange={(e) => setShowDiagnosticsVerbose(e.target.checked)} />
+              dev verbose diagnostics
+            </label>
             <div>status={diagnostics?.status ?? '-'} · mode={diagnostics?.mode ?? '-'}</div>
             <div>data_root={diagnostics?.data_root ?? '-'} · upload_root={diagnostics?.upload_root ?? '-'}</div>
+            <div>database={diagnostics?.database_url ?? '-'} · ollama={diagnostics?.ollama_base_url ?? '-'} · qdrant={diagnostics?.qdrant_url ?? '-'}</div>
+            <div>sensitive_details_included={String(diagnostics?.sensitive_details_included ?? false)}</div>
             <div>unresolved={(diagnostics?.unresolved_dependencies ?? []).join(', ') || 'none'}</div>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
               {Object.entries(diagnostics?.checks ?? {}).map(([k, v]) => (
@@ -545,6 +560,16 @@ export function ChatPanel() {
                 <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
                   <button onClick={() => approveRunMutation.mutate(selectedRunId)} style={{ fontSize: 11 }}>Approve publish</button>
                   <button onClick={() => rejectRunMutation.mutate(selectedRunId)} style={{ fontSize: 11 }}>Reject run</button>
+                </div>
+              )}
+              {runDetail?.run?.approval_status === 'pending' && (
+                <div style={{ fontSize: 12, marginTop: 4, background: '#fff7ed', border: '1px solid #fed7aa', padding: 6 }}>
+                  승인 전 draft이며 publish 후 메시지/아티팩트/provenance가 즉시 timeline에 반영됩니다.
+                </div>
+              )}
+              {runDetail?.run?.approval_status === 'approved' && runDetail?.final_message && (
+                <div style={{ fontSize: 12, marginTop: 4, background: '#ecfdf3', border: '1px solid #bbf7d0', padding: 6 }}>
+                  Published result: {runDetail.final_message.content_markdown.slice(0, 220)}
                 </div>
               )}
               {runs.map((r) => <button key={r.id} onClick={() => { setSelectedRunId(r.id); setShowOrchestrationDrawer(true); }} style={{ fontSize: 11, marginRight: 4 }}>#{r.id} {r.status}</button>)}
@@ -649,8 +674,9 @@ export function ChatPanel() {
                 <div>#{index + 1} {step.step_name}</div>
                 <div>role={step.assigned_role} · model={step.model_name ?? '-'}</div>
                 <div>routing={step.routing_reason ?? '-'} · reviewer={step.reviewer_decision ?? '-'}</div>
-                <div>role-tag={step.step_name.includes('critic') ? 'critic' : step.step_name.includes('reviewer') ? 'reviewer' : 'executor'}</div>
+                <div>role-tag={(step.step_metadata?.['step_group'] as string) ?? (step.step_name.includes('critic') ? 'critic' : step.step_name.includes('reviewer') ? 'reviewer' : 'executor')}</div>
                 <div>revision={step.step_name.includes('revision') ? 'yes' : 'no'} · used assets={(step.used_asset_ids ?? []).join(', ') || '-'} · gpu={String(step.gpu_enabled ?? true)}</div>
+                <div>metadata keys={Object.keys(step.step_metadata ?? {}).join(', ') || '-'}</div>
               </li>
             ))}
           </ol>

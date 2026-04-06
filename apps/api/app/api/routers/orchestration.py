@@ -10,9 +10,10 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models import Asset, ConversationSegment, Message, OrchestrationRun, OrchestrationStep, RoleEnum
 from app.schemas.orchestration import OrchestrationRunCreate, OrchestrationRunDetail, OrchestrationRunOut, OrchestrationStepOut
-from app.services.approval_state import clear_pending, get_pending
+from app.services.approval_state import get_pending, mark_approved, mark_rejected
 from app.services.ollama_client import OllamaUnavailableError
-from app.services.orchestrator import execute_orchestration
+from app.services.orchestrator import execute_orchestration, publish_final_message_from_payload
+from app.services.topic_segmentation import update_segment_summary
 
 router = APIRouter(prefix="/orchestration", tags=["orchestration"])
 
@@ -32,6 +33,12 @@ def _extract_meta(summary: str | None) -> tuple[dict, str | None]:
         return json.loads(raw), cleaned
     except json.JSONDecodeError:
         return {}, cleaned
+
+
+def _step_meta(step: OrchestrationStep) -> tuple[dict, str | None]:
+    if step.step_metadata_json and isinstance(step.step_metadata_json, dict):
+        return step.step_metadata_json, step.output_summary
+    return _extract_meta(step.output_summary)
 
 
 @router.post("/run", response_model=OrchestrationRunOut)
@@ -84,9 +91,9 @@ def run_detail(run_id: int, db: Session = Depends(get_db)):
     reviewer_step = next((step for step in steps if step.step_name == "reviewer_critic"), None)
     critic_step = next((step for step in steps if step.step_name == "critic_debate"), None)
     specialist_step = next((step for step in steps if step.step_name == "specialist_analyzer"), None)
-    reviewer_meta, _ = _extract_meta(reviewer_step.output_summary if reviewer_step else None)
-    critic_meta, critic_summary = _extract_meta(critic_step.output_summary if critic_step else None)
-    specialist_meta, specialist_summary = _extract_meta(specialist_step.output_summary if specialist_step else None)
+    reviewer_meta, _ = _step_meta(reviewer_step) if reviewer_step else ({}, None)
+    critic_meta, critic_summary = _step_meta(critic_step) if critic_step else ({}, None)
+    specialist_meta, specialist_summary = _step_meta(specialist_step) if specialist_step else ({}, None)
     reviewer_decision = reviewer_meta.get("reviewer_decision")
     provenance = {
         "routing_reason": reviewer_meta.get("routing_reason"),
@@ -129,7 +136,7 @@ def run_detail(run_id: int, db: Session = Depends(get_db)):
     pending = get_pending(run_id)
     parallel_groups = {}
     for step in steps:
-        meta = _extract_meta(step.output_summary)[0]
+        meta, _ = _step_meta(step)
         grp = meta.get("step_group")
         if grp:
             parallel_groups.setdefault(grp, []).append(step.id)
@@ -137,6 +144,46 @@ def run_detail(run_id: int, db: Session = Depends(get_db)):
         "parallel_groups": parallel_groups,
         "step_count": len(steps),
     }
+    step_payloads = []
+    for step in steps:
+        step_meta, step_output = _step_meta(step)
+        step_payloads.append(
+            OrchestrationStepOut(
+                id=step.id,
+                step_name=step.step_name,
+                assigned_role=step.assigned_role,
+                model_name=step.model_name,
+                status=step.status,
+                input_summary=step.input_summary,
+                output_summary=step_output,
+                duration_ms=(
+                    int((step.ended_at - step.started_at).total_seconds() * 1000)
+                    if step.started_at and step.ended_at
+                    else None
+                ),
+                routing_reason=step_meta.get("routing_reason"),
+                reviewer_decision=step_meta.get("reviewer_decision"),
+                used_asset_ids=step_meta.get("used_asset_ids", []),
+                used_chunk_ids=step_meta.get("used_chunk_ids", []),
+                image_asset_ids=step_meta.get("image_asset_ids", []),
+                vision_used=step_meta.get("vision_used"),
+                gpu_enabled=step_meta.get("gpu_enabled"),
+                used_segment_id=step_meta.get("used_segment_id"),
+                parent_segment_summary_used=step_meta.get("parent_segment_summary_used"),
+                step_group=step_meta.get("step_group"),
+                depends_on_step_ids=step_meta.get("depends_on_step_ids", []),
+                execution_mode=step_meta.get("execution_mode"),
+                fallback_model_name=step_meta.get("fallback_model_name"),
+                fallback_reason=step_meta.get("fallback_reason"),
+                retrieval_mode=step_meta.get("retrieval_mode"),
+                ocr_used=step_meta.get("ocr_used"),
+                retry_count=step_meta.get("retry_count", 0),
+                approval_required=step_meta.get("approval_required"),
+                approval_status=step_meta.get("approval_status"),
+                step_metadata=step_meta,
+            )
+        )
+
     return OrchestrationRunDetail(
         run={
             "id": run.id,
@@ -172,42 +219,7 @@ def run_detail(run_id: int, db: Session = Depends(get_db)):
             "execution_graph_summary": execution_graph_summary,
             "final_publish_status": "published" if run.final_message_id else ("pending" if run.status == "approval_pending" else run.status),
         },
-        steps=[
-            OrchestrationStepOut(
-                id=step.id,
-                step_name=step.step_name,
-                assigned_role=step.assigned_role,
-                model_name=step.model_name,
-                status=step.status,
-                input_summary=step.input_summary,
-                output_summary=_extract_meta(step.output_summary)[1],
-                duration_ms=(
-                    int((step.ended_at - step.started_at).total_seconds() * 1000)
-                    if step.started_at and step.ended_at
-                    else None
-                ),
-                routing_reason=_extract_meta(step.output_summary)[0].get("routing_reason"),
-                reviewer_decision=_extract_meta(step.output_summary)[0].get("reviewer_decision"),
-                used_asset_ids=_extract_meta(step.output_summary)[0].get("used_asset_ids", []),
-                used_chunk_ids=_extract_meta(step.output_summary)[0].get("used_chunk_ids", []),
-                image_asset_ids=_extract_meta(step.output_summary)[0].get("image_asset_ids", []),
-                vision_used=_extract_meta(step.output_summary)[0].get("vision_used"),
-                gpu_enabled=_extract_meta(step.output_summary)[0].get("gpu_enabled"),
-                used_segment_id=_extract_meta(step.output_summary)[0].get("used_segment_id"),
-                parent_segment_summary_used=_extract_meta(step.output_summary)[0].get("parent_segment_summary_used"),
-                step_group=_extract_meta(step.output_summary)[0].get("step_group"),
-                depends_on_step_ids=_extract_meta(step.output_summary)[0].get("depends_on_step_ids", []),
-                execution_mode=_extract_meta(step.output_summary)[0].get("execution_mode"),
-                fallback_model_name=_extract_meta(step.output_summary)[0].get("fallback_model_name"),
-                fallback_reason=_extract_meta(step.output_summary)[0].get("fallback_reason"),
-                retrieval_mode=_extract_meta(step.output_summary)[0].get("retrieval_mode"),
-                ocr_used=_extract_meta(step.output_summary)[0].get("ocr_used"),
-                retry_count=_extract_meta(step.output_summary)[0].get("retry_count", 0),
-                approval_required=_extract_meta(step.output_summary)[0].get("approval_required"),
-                approval_status=_extract_meta(step.output_summary)[0].get("approval_status"),
-            )
-            for step in steps
-        ],
+        steps=step_payloads,
         final_message=(
             {
                 "id": final_message.id,
@@ -231,7 +243,7 @@ def run_observability(run_id: int, db: Session = Depends(get_db)):
     steps = db.scalars(select(OrchestrationStep).where(OrchestrationStep.orchestration_run_id == run_id).order_by(OrchestrationStep.id.asc())).all()
     summary = []
     for step in steps:
-        meta, _ = _extract_meta(step.output_summary)
+        meta, _ = _step_meta(step)
         summary.append(
             {
                 "run_id": run_id,
@@ -288,7 +300,7 @@ def stream_run_events(run_id: int, db: Session = Depends(get_db)):
     def gen():
         yield f"event: run_started\ndata: {payload('run_started', status=run.status)}\n\n"
         for step in steps:
-            meta, _ = _extract_meta(step.output_summary)
+            meta, _ = _step_meta(step)
             start_type = "step_started"
             done_type = "step_completed"
             if step.step_name == "reviewer_critic":
@@ -327,28 +339,24 @@ def approve_run(run_id: int, db: Session = Depends(get_db)):
     run = db.get(OrchestrationRun, run_id)
     if not run:
         raise HTTPException(status_code=404, detail="run not found")
+    if run.status == "completed" and run.final_message_id:
+        return {"ok": True, "run_id": run_id, "final_message_id": run.final_message_id, "idempotent": True}
+
     pending = get_pending(run_id)
     if not pending:
-        raise HTTPException(status_code=400, detail="no pending approval")
+        raise HTTPException(status_code=409, detail="approval_state_inconsistent: no pending approval")
 
-    final_message = Message(
-        project_id=pending["project_id"],
-        chat_thread_id=pending["chat_thread_id"],
-        segment_id=pending["segment_id"],
-        role=RoleEnum.assistant,
-        content_markdown=pending["content_markdown"],
-        plain_text_cache=pending["content_markdown"],
-        sequence_no=pending["sequence_no"],
-        model_name=pending["model_name"],
-        model_role=pending["model_role"],
-    )
-    db.add(final_message)
-    db.flush()
-    run.final_message_id = final_message.id
-    run.status = "completed"
+    final_message = publish_final_message_from_payload(db=db, run=run, payload=pending)
+    transition = mark_approved(run_id, final_message.id)
+    if transition.status not in {"approved"}:
+        raise HTTPException(status_code=409, detail="approval_state_inconsistent: failed to mark approval")
+
+    for step in db.scalars(select(OrchestrationStep).where(OrchestrationStep.orchestration_run_id == run_id)).all():
+        if step.step_metadata_json and isinstance(step.step_metadata_json, dict):
+            step.step_metadata_json["approval_status"] = "approved"
+    update_segment_summary(db, int(pending["segment_id"]))
     db.commit()
-    clear_pending(run_id)
-    return {"ok": True, "run_id": run_id, "final_message_id": final_message.id}
+    return {"ok": True, "run_id": run_id, "final_message_id": final_message.id, "idempotent": bool(transition.idempotent)}
 
 
 @router.post("/runs/{run_id}/reject")
@@ -356,7 +364,21 @@ def reject_run(run_id: int, db: Session = Depends(get_db)):
     run = db.get(OrchestrationRun, run_id)
     if not run:
         raise HTTPException(status_code=404, detail="run not found")
+    if run.status == "rejected":
+        return {"ok": True, "run_id": run_id, "status": "rejected", "idempotent": True}
+    if run.status == "completed":
+        raise HTTPException(status_code=400, detail="already published; cannot reject")
+
+    transition = mark_rejected(run_id)
+    if transition.status == "missing":
+        raise HTTPException(status_code=409, detail="approval_state_inconsistent: no pending approval")
+    if transition.status not in {"rejected"}:
+        raise HTTPException(status_code=409, detail="approval_state_inconsistent: invalid approval state transition")
+
     run.status = "rejected"
+    run.ended_at = datetime.utcnow()
+    for step in db.scalars(select(OrchestrationStep).where(OrchestrationStep.orchestration_run_id == run_id)).all():
+        if step.step_metadata_json and isinstance(step.step_metadata_json, dict):
+            step.step_metadata_json["approval_status"] = "rejected"
     db.commit()
-    clear_pending(run_id)
-    return {"ok": True, "run_id": run_id, "status": "rejected"}
+    return {"ok": True, "run_id": run_id, "status": "rejected", "idempotent": bool(transition.idempotent)}

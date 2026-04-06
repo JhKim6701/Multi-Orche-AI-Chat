@@ -132,4 +132,5 @@ export interface OrchestrationStep {
   ocr_used?: boolean | null;
   approval_required?: boolean | null;
   approval_status?: string | null;
+  step_metadata?: Record<string, unknown>;
 }
