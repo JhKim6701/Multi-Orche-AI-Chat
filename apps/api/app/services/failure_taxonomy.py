@@ -17,6 +17,8 @@ def classify_failure(message: str) -> str:
         return "routing_fallback"
     if "approval" in text and "pending" in text:
         return "approval_pending_timeout"
+    if "approval state" in text or "approval_state" in text or "no pending approval" in text:
+        return "approval_state_inconsistent"
     if "desktop" in text and ("misconfigured" in text or "mode mismatch" in text):
         return "desktop_runtime_misconfigured"
     return "runtime_error"
@@ -31,6 +33,7 @@ def recovery_hint(category: str) -> str:
         "retrieval_empty": "retrieval scope(세그먼트/채팅)와 query를 조정해보세요.",
         "routing_fallback": "모델 capabilities와 enabled/downloaded 상태를 확인하세요.",
         "approval_pending_timeout": "승인 대기 상태를 점검하고 approve/reject를 수행하세요.",
+        "approval_state_inconsistent": "승인 상태 파일과 DB 상태가 어긋났습니다. run detail을 확인 후 재시도하세요.",
         "desktop_runtime_misconfigured": "desktop 모드(env/config)와 doctor 결과를 확인하세요.",
         "runtime_error": "로그와 diagnostics 패널을 확인 후 재시도하세요.",
     }.get(category, "로그와 diagnostics 패널을 확인 후 재시도하세요.")
