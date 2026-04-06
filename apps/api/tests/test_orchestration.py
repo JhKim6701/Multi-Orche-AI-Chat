@@ -83,6 +83,7 @@ def test_orchestration_run_happy_path(monkeypatch):
     assert 'asset' in (ctx_step.get('input_summary') or '').lower() or 'asset' in (ctx_step.get('output_summary') or '').lower()
     assert isinstance(ctx_step.get('used_chunk_ids', []), list)
     assert ctx_step.get('retrieval_mode') is not None
+    assert ctx_step.get('execution_mode') in {'sequential', 'parallel_candidate'}
     assert payload['final_message'] is not None
     assert 'final_provenance_summary' in payload['final_message']
 
@@ -132,6 +133,7 @@ def test_orchestration_stream_payload_shape(monkeypatch):
     assert 'final_message_id' in body
     assert 'reviewer_completed' in body
     assert 'critic_completed' in body
+    assert 'specialist_completed' in body or 'specialist_started' in body
 
 
 def test_orchestration_reviewer_happy_path(monkeypatch):

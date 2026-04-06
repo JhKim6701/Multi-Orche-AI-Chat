@@ -52,6 +52,7 @@ class OrchestrationStepOut(BaseModel):
     execution_mode: str | None = None
     retry_count: int = 0
     fallback_model_name: str | None = None
+    fallback_reason: str | None = None
     retrieval_mode: str | None = None
     ocr_used: bool | None = None
     approval_required: bool | None = None

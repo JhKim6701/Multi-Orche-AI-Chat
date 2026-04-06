@@ -49,6 +49,7 @@ type StreamEvent = {
   reviewer_decision?: string | null;
   assigned_role?: string | null;
   fallback_model_name?: string | null;
+  fallback_reason?: string | null;
   retry_count?: number;
   approval_status?: string | null;
 };
@@ -183,8 +184,11 @@ export function ChatPanel() {
     source.addEventListener('step_completed', handle);
     source.addEventListener('reviewer_started', handle);
     source.addEventListener('reviewer_completed', handle);
+    source.addEventListener('specialist_started', handle);
+    source.addEventListener('specialist_completed', handle);
     source.addEventListener('revision_started', handle);
     source.addEventListener('revision_completed', handle);
+    source.addEventListener('step_failed', handle);
     source.addEventListener('run_completed', handle);
     source.addEventListener('run_failed', handle);
     source.onerror = () => source.close();
@@ -496,6 +500,7 @@ export function ChatPanel() {
               <div style={{ fontSize: 12 }}>Used assets: {(runDetail?.run?.used_asset_ids ?? []).join(', ') || '-'} · used chunks: {(runDetail?.run?.used_chunk_ids ?? []).join(', ') || '-'} · image assets: {(runDetail?.run?.image_asset_ids ?? []).join(', ') || '-'} · vision used: {String(runDetail?.run?.vision_used ?? false)} · gpu enabled: {String(runDetail?.run?.gpu_enabled ?? true)}</div>
               <div style={{ fontSize: 12 }}>retrieval mode: {runDetail?.run?.retrieval_mode ?? '-'} · ocr used: {String(runDetail?.run?.ocr_used ?? false)}</div>
               <div style={{ fontSize: 12 }}>Critic model: {runDetail?.run?.critic_model ?? '-'} · critic summary: {runDetail?.run?.critic_summary ?? '-'}</div>
+              <div style={{ fontSize: 12 }}>Specialist model: {runDetail?.run?.specialist_model ?? '-'} · specialist summary: {runDetail?.run?.specialist_summary ?? '-'}</div>
               <div style={{ fontSize: 12 }}>Approval: {runDetail?.run?.approval_status ?? '-'} · publish: {runDetail?.run?.final_publish_status ?? '-'}</div>
               {runDetail?.run?.pending_final_draft && (
                 <div style={{ fontSize: 12, border: '1px dashed #ccc', padding: 6, marginTop: 4 }}>
@@ -519,7 +524,7 @@ export function ChatPanel() {
                       <div>output: {step.output_summary ?? '-'}</div>
                       <div>routing_reason: {step.routing_reason ?? '-'} · reviewer_decision: {step.reviewer_decision ?? '-'} · execution_mode: {step.execution_mode ?? '-'}</div>
                       <div>used_asset_ids: {(step.used_asset_ids ?? []).join(', ') || '-'} · used_chunk_ids: {(step.used_chunk_ids ?? []).join(', ') || '-'} · image_asset_ids: {(step.image_asset_ids ?? []).join(', ') || '-'} · vision_used: {String(step.vision_used ?? false)}</div>
-                      <div>used_segment: {step.used_segment_id ?? '-'} · parent_summary_used: {String(step.parent_segment_summary_used ?? false)} · retry={step.retry_count ?? 0} · fallback={step.fallback_model_name ?? '-'}</div>
+                      <div>used_segment: {step.used_segment_id ?? '-'} · parent_summary_used: {String(step.parent_segment_summary_used ?? false)} · retry={step.retry_count ?? 0} · fallback={step.fallback_model_name ?? '-'} ({step.fallback_reason ?? 'n/a'})</div>
                       <div>group={step.step_group ?? '-'} · depends_on={(step.depends_on_step_ids ?? []).join(', ') || '-'} · retrieval={step.retrieval_mode ?? '-'} · ocr={String(step.ocr_used ?? false)} · approval={step.approval_status ?? '-'}</div>
                     </li>
                   ))}
@@ -527,11 +532,23 @@ export function ChatPanel() {
               ) : null}
               {!!liveEvents.length && (
                 <div style={{ marginTop: 6, fontSize: 11, borderTop: '1px dashed #ddd', paddingTop: 6 }}>
-                  {liveEvents.map((evt, idx) => (
-                    <div key={`${evt.timestamp}-${idx}`} style={{ background: evt.event_type.includes('retry') || evt.event_type.includes('fallback') ? '#fff3e0' : evt.event_type.includes('approval') ? '#e8f5e9' : 'transparent' }}>
-                      [{evt.event_type}] step={evt.step_name ?? '-'} role={evt.assigned_role ?? '-'} status={evt.status} model={evt.model_name ?? '-'} fallback={evt.fallback_model_name ?? '-'} retry={evt.retry_count ?? 0} approval={evt.approval_status ?? '-'}
-                    </div>
-                  ))}
+                  {liveEvents.map((evt, idx) => {
+                    const bg = evt.event_type.includes('failed')
+                      ? '#ffe4e6'
+                      : evt.event_type.includes('retry') || evt.event_type.includes('fallback')
+                        ? '#fff3e0'
+                        : evt.event_type.includes('approval')
+                          ? '#e8f5e9'
+                          : evt.event_type.includes('specialist')
+                            ? '#eef2ff'
+                            : 'transparent';
+                    return (
+                      <div key={`${evt.timestamp}-${idx}`} style={{ background: bg, borderRadius: 4, padding: '2px 4px', marginBottom: 2 }}>
+                        <strong>{evt.event_type}</strong> · step={evt.step_name ?? '-'} · role={evt.assigned_role ?? '-'} · status={evt.status} · model={evt.model_name ?? '-'}
+                        <div>retry={evt.retry_count ?? 0} · fallback={evt.fallback_model_name ?? '-'} ({evt.fallback_reason ?? 'n/a'}) · approval={evt.approval_status ?? '-'}</div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </>

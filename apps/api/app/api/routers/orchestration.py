@@ -83,8 +83,10 @@ def run_detail(run_id: int, db: Session = Depends(get_db)):
     active_step = next((step for step in steps if step.status == "running"), None)
     reviewer_step = next((step for step in steps if step.step_name == "reviewer_critic"), None)
     critic_step = next((step for step in steps if step.step_name == "critic_debate"), None)
+    specialist_step = next((step for step in steps if step.step_name == "specialist_analyzer"), None)
     reviewer_meta, _ = _extract_meta(reviewer_step.output_summary if reviewer_step else None)
     critic_meta, critic_summary = _extract_meta(critic_step.output_summary if critic_step else None)
+    specialist_meta, specialist_summary = _extract_meta(specialist_step.output_summary if specialist_step else None)
     reviewer_decision = reviewer_meta.get("reviewer_decision")
     provenance = {
         "routing_reason": reviewer_meta.get("routing_reason"),
@@ -100,6 +102,8 @@ def run_detail(run_id: int, db: Session = Depends(get_db)):
         "ocr_used": reviewer_meta.get("ocr_used"),
         "critic_model": critic_step.model_name if critic_step else None,
         "critic_summary": critic_summary,
+        "specialist_model": specialist_step.model_name if specialist_step else None,
+        "specialist_summary": specialist_summary,
     }
     generated_artifacts = []
     if final_message:
@@ -161,6 +165,8 @@ def run_detail(run_id: int, db: Session = Depends(get_db)):
             "ocr_used": provenance["ocr_used"],
             "critic_model": provenance["critic_model"],
             "critic_summary": provenance["critic_summary"],
+            "specialist_model": provenance["specialist_model"],
+            "specialist_summary": provenance["specialist_summary"],
             "approval_status": "pending" if run.status == "approval_pending" else ("rejected" if run.status == "rejected" else "approved"),
             "pending_final_draft": (pending or {}).get("content_markdown") if pending else None,
             "execution_graph_summary": execution_graph_summary,
@@ -188,6 +194,7 @@ def run_detail(run_id: int, db: Session = Depends(get_db)):
                 depends_on_step_ids=_extract_meta(step.output_summary)[0].get("depends_on_step_ids", []),
                 execution_mode=_extract_meta(step.output_summary)[0].get("execution_mode"),
                 fallback_model_name=_extract_meta(step.output_summary)[0].get("fallback_model_name"),
+                fallback_reason=_extract_meta(step.output_summary)[0].get("fallback_reason"),
                 retrieval_mode=_extract_meta(step.output_summary)[0].get("retrieval_mode"),
                 ocr_used=_extract_meta(step.output_summary)[0].get("ocr_used"),
                 retry_count=_extract_meta(step.output_summary)[0].get("retry_count", 0),
@@ -226,9 +233,14 @@ def stream_run_events(run_id: int, db: Session = Depends(get_db)):
             "run_id": run_id,
             "step_id": None,
             "step_name": None,
+            "assigned_role": None,
             "status": run.status,
             "model_name": None,
+            "fallback_model_name": None,
+            "fallback_reason": None,
+            "retry_count": 0,
             "segment_id": segment_id,
+            "approval_status": None,
             "timestamp": datetime.utcnow().isoformat(),
         }
         base.update(kwargs)
@@ -246,15 +258,21 @@ def stream_run_events(run_id: int, db: Session = Depends(get_db)):
             elif step.step_name == "critic_debate":
                 start_type = "critic_started"
                 done_type = "critic_completed"
+            elif step.step_name == "specialist_analyzer":
+                start_type = "specialist_started"
+                done_type = "specialist_completed"
             elif step.step_name == "final_responder_revision":
                 start_type = "revision_started"
                 done_type = "revision_completed"
             if meta.get("retry_count", 0):
                 yield f"event: retry_started\ndata: {payload('retry_started', step_id=step.id, step_name=step.step_name, status='retrying', model_name=step.model_name, retry_count=meta.get('retry_count'))}\n\n"
             if meta.get("fallback_model_name"):
-                yield f"event: fallback_started\ndata: {payload('fallback_started', step_id=step.id, step_name=step.step_name, status='fallback', model_name=step.model_name, fallback_model_name=meta.get('fallback_model_name'))}\n\n"
-            yield f"event: {start_type}\ndata: {payload(start_type, step_id=step.id, step_name=step.step_name, status='running', model_name=step.model_name, reviewer_decision=meta.get('reviewer_decision'))}\n\n"
-            yield f"event: {done_type}\ndata: {payload(done_type, step_id=step.id, step_name=step.step_name, assigned_role=step.assigned_role, status=step.status, model_name=step.model_name, reviewer_decision=meta.get('reviewer_decision'), vision_used=meta.get('vision_used'), image_asset_ids=meta.get('image_asset_ids', []), gpu_enabled=meta.get('gpu_enabled'), fallback_model_name=meta.get('fallback_model_name'), retry_count=meta.get('retry_count', 0), approval_status=meta.get('approval_status'))}\n\n"
+                yield f"event: fallback_started\ndata: {payload('fallback_started', step_id=step.id, step_name=step.step_name, assigned_role=step.assigned_role, status='fallback', model_name=step.model_name, fallback_model_name=meta.get('fallback_model_name'), fallback_reason=meta.get('fallback_reason'))}\n\n"
+            yield f"event: {start_type}\ndata: {payload(start_type, step_id=step.id, step_name=step.step_name, assigned_role=step.assigned_role, status='running', model_name=step.model_name, reviewer_decision=meta.get('reviewer_decision'))}\n\n"
+            if step.status == "failed":
+                yield f"event: step_failed\ndata: {payload('step_failed', step_id=step.id, step_name=step.step_name, assigned_role=step.assigned_role, status='failed', model_name=step.model_name, fallback_model_name=meta.get('fallback_model_name'), retry_count=meta.get('retry_count', 0), approval_status=meta.get('approval_status'))}\n\n"
+            else:
+                yield f"event: {done_type}\ndata: {payload(done_type, step_id=step.id, step_name=step.step_name, assigned_role=step.assigned_role, status=step.status, model_name=step.model_name, reviewer_decision=meta.get('reviewer_decision'), vision_used=meta.get('vision_used'), image_asset_ids=meta.get('image_asset_ids', []), gpu_enabled=meta.get('gpu_enabled'), fallback_model_name=meta.get('fallback_model_name'), fallback_reason=meta.get('fallback_reason'), retry_count=meta.get('retry_count', 0), approval_status=meta.get('approval_status'))}\n\n"
         if run.status == "approval_pending":
             yield f"event: approval_pending\ndata: {payload('approval_pending', run_id=run_id, approval_status='pending')}\n\n"
         end_event = "run_completed" if run.status == "completed" else "run_failed"

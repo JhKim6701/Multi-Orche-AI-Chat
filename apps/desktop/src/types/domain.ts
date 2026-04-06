@@ -96,6 +96,8 @@ export interface OrchestrationRun {
   ocr_used?: boolean | null;
   critic_model?: string | null;
   critic_summary?: string | null;
+  specialist_model?: string | null;
+  specialist_summary?: string | null;
   approval_status?: string | null;
   pending_final_draft?: string | null;
   execution_graph_summary?: { parallel_groups?: Record<string, number[]>; step_count?: number };
@@ -124,6 +126,7 @@ export interface OrchestrationStep {
   execution_mode?: string | null;
   retry_count?: number;
   fallback_model_name?: string | null;
+  fallback_reason?: string | null;
   retrieval_mode?: string | null;
   ocr_used?: boolean | null;
   approval_required?: boolean | null;

@@ -228,6 +228,7 @@ async def execute_orchestration(
             call_model = model_name
             retry_count = 0
             fallback_model_name = None
+            fallback_reason = None
 
             resp = await client.chat(model_name=call_model, messages=[{"role": "user", "content": plan.prompt}])
             output = resp.get("message", {}).get("content") or ""
@@ -247,6 +248,7 @@ async def execute_orchestration(
                 )
                 if fallback:
                     fallback_model_name = fallback.model_name
+                    fallback_reason = "empty_response_after_retry"
                     call_model = fallback_model_name
                     resp = await client.chat(model_name=call_model, messages=[{"role": "user", "content": plan.prompt}])
                     output = resp.get("message", {}).get("content") or "(empty)"
@@ -271,6 +273,7 @@ async def execute_orchestration(
                     "execution_mode": "parallel_candidate" if plan.name in {"context_resolver", "specialist_analyzer"} else "sequential",
                     "retry_count": retry_count,
                     "fallback_model_name": fallback_model_name,
+                    "fallback_reason": fallback_reason,
                     "approval_required": require_approval_before_publish,
                     "approval_status": "not_required" if not require_approval_before_publish else "pending",
                 },
