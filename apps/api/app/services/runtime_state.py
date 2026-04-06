@@ -5,7 +5,7 @@ from pathlib import Path
 
 from app.core.config import settings
 
-_STATE_FILE = Path(settings.upload_root) / "runtime_state.json"
+_STATE_FILE = Path(settings.runtime_state_file)
 
 
 def _load_state() -> dict:

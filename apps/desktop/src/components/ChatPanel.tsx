@@ -329,6 +329,15 @@ export function ChatPanel() {
     return map;
   }, [assets]);
   const visionPending = file?.type?.startsWith('image/') ?? false;
+  const surfaceError = (manualRunMutation.error || orchestrateMutation.error || branchMutation.error || switchSegment.error) as Error | null;
+  const errorText = (surfaceError?.message ?? '').toLowerCase();
+  const recoveryHint = errorText.includes('ollama')
+    ? 'Ollama가 실행 중인지 확인 후 다시 시도하세요.'
+    : errorText.includes('qdrant')
+      ? 'Qdrant 연결을 확인하거나 retrieval fallback 상태를 확인하세요.'
+      : errorText.includes('upload') || errorText.includes('write')
+        ? '업로드/데이터 경로 권한을 확인하세요.'
+        : '시스템 상태 배너를 확인하고 다시 시도하세요.';
 
   const divergenceLabel = useMemo(() => {
     if (!divergence) return '';
@@ -561,7 +570,17 @@ export function ChatPanel() {
           {runDetail?.final_message?.final_provenance_summary && <div>{runDetail.final_message.final_provenance_summary}</div>}
         </div>
       )}
-      {(manualRunMutation.error || orchestrateMutation.error || branchMutation.error || switchSegment.error) && <p style={{ color: 'red' }}>{((manualRunMutation.error || orchestrateMutation.error || branchMutation.error || switchSegment.error) as Error).message}</p>}
+      {surfaceError && (
+        <div style={{ color: '#b42318', border: '1px solid #fecdca', background: '#fef3f2', padding: 8, borderRadius: 6, fontSize: 12 }}>
+          <div><strong>요청 처리 실패</strong></div>
+          <div>{surfaceError.message}</div>
+          <div style={{ marginTop: 4 }}>복구 안내: {recoveryHint}</div>
+          <button style={{ marginTop: 6, fontSize: 11 }} onClick={() => {
+            qc.invalidateQueries({ queryKey: ['messages', selectedChatId] });
+            qc.invalidateQueries({ queryKey: ['orchestration-run-detail', selectedRunId] });
+          }}>Retry load</button>
+        </div>
+      )}
       {showOrchestrationDrawer && (
         <aside style={{ position: 'fixed', right: 0, top: 0, width: 420, height: '100%', background: '#fff', borderLeft: '1px solid #ddd', padding: 12, overflow: 'auto', boxShadow: '-2px 0 8px rgba(0,0,0,0.08)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

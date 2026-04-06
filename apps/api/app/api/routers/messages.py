@@ -88,6 +88,8 @@ async def execute_message(payload: MessageExecutionRequest, db: Session = Depend
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except OllamaUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=f"execution runtime failure: {exc}") from exc
     return MessageExecutionResult(used_segment_id=used_segment_id, user_message=user, assistant_messages=assistants, retrieval=retrieval)
 
 

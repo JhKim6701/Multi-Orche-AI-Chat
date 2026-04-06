@@ -8,7 +8,18 @@ client = TestClient(app)
 def test_health():
     r = client.get('/system/health')
     assert r.status_code == 200
-    assert r.json()['status'] == 'ok'
+    payload = r.json()
+    assert payload['status'] in {'ok', 'degraded'}
+    assert 'checks' in payload
+    assert {'database', 'ollama', 'qdrant', 'upload_root'}.issubset(payload['checks'].keys())
+
+
+def test_readiness_shape():
+    r = client.get('/system/readiness')
+    assert r.status_code == 200
+    payload = r.json()
+    assert 'ready' in payload
+    assert 'checks' in payload
 
 
 def test_project_chat_message_flow():

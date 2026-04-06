@@ -5,7 +5,7 @@ from pathlib import Path
 
 from app.core.config import settings
 
-_FILE = Path(settings.upload_root) / "pending_approvals.json"
+_FILE = Path(settings.pending_approval_file)
 
 
 def _load() -> dict:

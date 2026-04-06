@@ -55,7 +55,10 @@ def create_ai_generated_artifact(
     stamped_name = f"{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{default_name}"
     filename = sanitize_filename(stamped_name)
     target = safe_join(generated_dir, filename)
-    target.write_text(content, encoding="utf-8")
+    try:
+        target.write_text(content, encoding="utf-8")
+    except OSError as exc:
+        raise RuntimeError(f"generated artifact write failed: {exc}") from exc
 
     metadata = {
         "kind": kind,
@@ -69,7 +72,7 @@ def create_ai_generated_artifact(
         metadata["artifact_summary"] = "code_file"
     if orchestration_run_id is not None:
         metadata["orchestration_run_id"] = orchestration_run_id
-    if "image" in text.lower():
+    if "image" in content.lower():
         metadata["image_placeholder"] = True
 
     asset = Asset(

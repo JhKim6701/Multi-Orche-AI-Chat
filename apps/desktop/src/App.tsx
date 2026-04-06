@@ -7,17 +7,17 @@ import { TopBar } from './components/TopBar';
 
 export function App() {
   return (
-    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: '#fcfcfd' }}>
       <TopBar />
       <PanelGroup direction="horizontal" autoSaveId="main-layout">
         <Panel defaultSize={20} minSize={15}>
           <ProjectPanel />
         </Panel>
-        <PanelResizeHandle style={{ width: 4, background: '#efefef' }} />
+        <PanelResizeHandle style={{ width: 4, background: '#e4e7ec' }} />
         <Panel defaultSize={55} minSize={35}>
           <ChatPanel />
         </Panel>
-        <PanelResizeHandle style={{ width: 4, background: '#efefef' }} />
+        <PanelResizeHandle style={{ width: 4, background: '#e4e7ec' }} />
         <Panel defaultSize={25} minSize={20}>
           <ModelPanel />
         </Panel>

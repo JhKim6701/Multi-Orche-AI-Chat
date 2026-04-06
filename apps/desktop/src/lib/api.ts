@@ -4,13 +4,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API}${path}`, init);
   if (!res.ok) {
     let detail = res.statusText;
+    let hint = '';
     try {
       const payload = await res.json();
-      detail = payload.detail ?? detail;
+      detail = payload.detail ?? payload.error?.message ?? detail;
+      hint = payload.error?.recovery_hint ? `\n복구 안내: ${payload.error.recovery_hint}` : '';
     } catch {
       // ignore
     }
-    throw new Error(detail || 'request failed');
+    throw new Error((detail || 'request failed') + hint);
   }
   return res.json() as Promise<T>;
 }

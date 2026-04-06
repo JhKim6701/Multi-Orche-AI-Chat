@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "multi-orche-ai-chat",
+  "productName": "Multi-Orche AI Chat",
   "version": "0.1.0",
   "identifier": "com.multi.orche.ai.chat",
   "build": {
@@ -8,6 +8,6 @@
     "devUrl": "http://localhost:5173"
   },
   "app": {
-    "windows": [{ "title": "multi-orche-ai-chat", "width": 1400, "height": 900 }]
+    "windows": [{ "title": "Multi-Orche AI Chat Desktop", "width": 1440, "height": 920, "resizable": true }]
   }
 }

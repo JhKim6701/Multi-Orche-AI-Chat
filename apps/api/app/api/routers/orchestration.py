@@ -58,6 +58,8 @@ async def run_orchestration(payload: OrchestrationRunCreate, db: Session = Depen
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except OllamaUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=f"orchestration runtime failure: {exc}") from exc
 
     return run
 

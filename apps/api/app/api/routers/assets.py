@@ -48,7 +48,13 @@ async def upload_asset(
     )
     db.add(asset)
     db.flush()
-    ingest_asset(db, asset)
+    try:
+        ingest_asset(db, asset)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"asset ingest failed: {exc}. upload/data root 또는 qdrant/embedding 의존성을 확인하세요.",
+        ) from exc
     db.commit()
     db.refresh(asset)
     return asset

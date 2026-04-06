@@ -17,6 +17,11 @@ export function ModelPanel() {
   const setOrchestratorModelName = useUiStore((s) => s.setOrchestratorModelName);
 
   const { data: models = [], isLoading, error } = useQuery({ queryKey: ['models'], queryFn: () => api.get<Model[]>('/models') });
+  const { data: runtimeInfo, refetch: refetchRuntime } = useQuery({
+    queryKey: ['runtime-info'],
+    queryFn: () => api.get<{ env: string; mode: string; data_root: string; upload_root: string; database_url: string; qdrant_url: string; ollama_base_url: string; gpu_enabled: boolean }>('/system/runtime-info'),
+    refetchInterval: 15000,
+  });
 
   const syncMutation = useMutation({ mutationFn: () => api.post<Model[]>('/models/sync'), onSuccess: () => qc.invalidateQueries({ queryKey: ['models'] }) });
   const pullMutation = useMutation({ mutationFn: (modelName: string) => api.post('/models/pull', { model_name: modelName }), onSuccess: () => qc.invalidateQueries({ queryKey: ['models'] }) });
@@ -61,10 +66,15 @@ export function ModelPanel() {
       </div>
 
       <button onClick={() => syncMutation.mutate()} style={{ fontSize: 12 }}>Sync Ollama</button>
-      {syncMutation.error && <p style={{ color: 'red', fontSize: 12 }}>{(syncMutation.error as Error).message}</p>}
+      {syncMutation.error && <p style={{ color: '#b42318', fontSize: 12 }}>Ollama model sync 실패: {(syncMutation.error as Error).message}</p>}
 
       {isLoading ? <p>Loading models...</p> : null}
-      {error ? <p style={{ color: 'red' }}>Failed to load models</p> : null}
+      {error ? (
+        <p style={{ color: '#b42318', fontSize: 12 }}>
+          모델 목록 로딩 실패. API 연결 상태를 확인하고 다시 시도하세요.
+          <button style={{ marginLeft: 6, fontSize: 11 }} onClick={() => qc.invalidateQueries({ queryKey: ['models'] })}>Retry</button>
+        </p>
+      ) : null}
 
       {models.map((m) => (
         <div key={m.id} style={{ borderBottom: '1px solid #efefef', padding: '6px 0' }}>
@@ -86,6 +96,18 @@ export function ModelPanel() {
       <div style={{ fontSize: 12 }}>
         <strong>Manual Execution Order (sort_order)</strong>
         {selectedModelsOrdered.length === 0 ? <div>none</div> : selectedModelsOrdered.map((m, idx) => <div key={m.id}>{idx + 1}. {m.model_name}</div>)}
+      </div>
+      <hr />
+      <div style={{ fontSize: 11, lineHeight: 1.5 }}>
+        <strong>Runtime Settings (read-only)</strong>
+        <div>mode={runtimeInfo?.mode ?? '-'}</div>
+        <div>env={runtimeInfo?.env ?? '-'}</div>
+        <div>data_root={runtimeInfo?.data_root ?? '-'}</div>
+        <div>upload_root={runtimeInfo?.upload_root ?? '-'}</div>
+        <div>database={runtimeInfo?.database_url ?? '-'}</div>
+        <div>qdrant={runtimeInfo?.qdrant_url ?? '-'}</div>
+        <div>ollama={runtimeInfo?.ollama_base_url ?? '-'}</div>
+        <button style={{ fontSize: 11, marginTop: 4 }} onClick={() => refetchRuntime()}>Refresh runtime info</button>
       </div>
     </aside>
   );

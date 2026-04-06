@@ -15,6 +15,14 @@ class QdrantStore:
     def _collection_url(self) -> str:
         return f"{self.base_url}/collections/{self.collection}"
 
+    def health(self) -> bool:
+        try:
+            with httpx.Client(timeout=3.0) as client:
+                resp = client.get(f"{self.base_url}/healthz")
+                return resp.status_code == 200
+        except Exception:
+            return False
+
     def ensure_collection(self, vector_size: int) -> dict[str, Any]:
         with httpx.Client(timeout=10.0) as client:
             get_resp = client.get(self._collection_url())
