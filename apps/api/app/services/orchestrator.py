@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.models import Asset, ConversationSegment, Message, ModelRegistry, OrchestrationRun, OrchestrationStep, RoleEnum
 from app.services.artifact_manager import create_ai_generated_artifact
 from app.services.approval_state import set_pending
-from app.services.asset_ingestion import retrieve_relevant_context
+from app.services.asset_ingestion import pack_retrieval_context, retrieve_relevant_context
 from app.services.ollama_client import OllamaClient
 from app.services.runtime_state import get_gpu_enabled
 from app.services.topic_segmentation import maybe_start_new_segment, update_segment_summary
@@ -127,8 +127,18 @@ async def execute_orchestration(
 
     has_image = any(a.mime_type.startswith("image/") for a in assets)
     image_payloads, image_asset_ids = _encode_image_assets(assets)
-    context_hits = retrieve_relevant_context(db=db, chat_thread_id=chat_thread_id, query=content_markdown, limit=8)
-    context_block = "\n".join([f"asset#{h['asset_id']} {h['filename']}: {h['snippet']}" for h in context_hits])
+    context_hits = retrieve_relevant_context(
+        db=db,
+        chat_thread_id=chat_thread_id,
+        project_id=project_id,
+        segment_id=segment.id,
+        query=content_markdown,
+        limit=10,
+    )
+    packed_context, retrieval_meta = pack_retrieval_context(context_hits)
+    context_block = "\n".join(
+        [f"asset#{h['asset_id']} chunk#{h['chunk_id']} {h['filename']} score={h['score']}: {h['snippet']}" for h in context_hits]
+    )
     needs_reasoning = len(context_block) > 800
 
     run = OrchestrationRun(
@@ -163,7 +173,7 @@ async def execute_orchestration(
         if parent:
             parent_summary = parent.topic_summary[:200]
     planner_prompt = f"segment#{segment.id} topic={segment.topic_label} parent_summary={parent_summary} 사용자 요청 계획: {content_markdown}"
-    context_prompt = f"자산 컨텍스트를 요약하라:\n{context_block or '자산 컨텍스트 없음'}"
+    context_prompt = f"자산 컨텍스트를 요약하라:\n{packed_context or context_block or '자산 컨텍스트 없음'}"
     router_prompt = f"모델 라우팅 결정: chosen={model_name}, reason={routing_reason}, has_image={has_image}, context_len={len(context_block)}"
 
     step_plans = [
@@ -183,7 +193,8 @@ async def execute_orchestration(
 
     client = OllamaClient()
     step_outputs: list[str] = []
-    used_asset_ids = [hit["asset_id"] for hit in context_hits]
+    used_asset_ids = sorted({hit["asset_id"] for hit in context_hits})
+    used_chunk_ids = [hit["chunk_id"] for hit in context_hits]
     parent_summary_used = bool(parent_summary)
 
     try:
@@ -249,6 +260,9 @@ async def execute_orchestration(
                     "gpu_enabled": gpu_enabled,
                     "used_asset_ids": used_asset_ids,
                     "image_asset_ids": image_asset_ids,
+                    "used_chunk_ids": used_chunk_ids,
+                    "retrieval_mode": retrieval_meta.get("retrieval_mode"),
+                    "ocr_used": retrieval_meta.get("ocr_used"),
                     "vision_used": has_image,
                     "used_segment_id": segment.id,
                     "parent_segment_summary_used": parent_summary_used,
@@ -304,6 +318,9 @@ async def execute_orchestration(
                     "routing_reason": routing_reason,
                     "used_asset_ids": used_asset_ids,
                     "image_asset_ids": image_asset_ids,
+                    "used_chunk_ids": used_chunk_ids,
+                    "retrieval_mode": retrieval_meta.get("retrieval_mode"),
+                    "ocr_used": retrieval_meta.get("ocr_used"),
                     "vision_used": bool(image_payloads and can_use_vision),
                     "used_segment_id": segment.id,
                     "parent_segment_summary_used": parent_summary_used,
@@ -349,6 +366,9 @@ async def execute_orchestration(
                 "reviewer_decision": reviewer_decision,
                     "used_asset_ids": used_asset_ids,
                     "image_asset_ids": image_asset_ids,
+                    "used_chunk_ids": used_chunk_ids,
+                    "retrieval_mode": retrieval_meta.get("retrieval_mode"),
+                    "ocr_used": retrieval_meta.get("ocr_used"),
                     "vision_used": bool(image_payloads and can_use_vision),
                     "used_segment_id": segment.id,
                     "parent_segment_summary_used": parent_summary_used,
@@ -406,6 +426,9 @@ async def execute_orchestration(
                 "gpu_enabled": gpu_enabled,
                 "used_asset_ids": used_asset_ids,
                 "image_asset_ids": image_asset_ids,
+                "used_chunk_ids": used_chunk_ids,
+                "retrieval_mode": retrieval_meta.get("retrieval_mode"),
+                "ocr_used": retrieval_meta.get("ocr_used"),
                 "vision_used": bool(image_payloads and can_use_vision),
                 "used_segment_id": segment.id,
                 "parent_segment_summary_used": parent_summary_used,
@@ -457,6 +480,9 @@ async def execute_orchestration(
                     "reviewer_decision": reviewer_decision,
                     "used_asset_ids": used_asset_ids,
                     "image_asset_ids": image_asset_ids,
+                    "used_chunk_ids": used_chunk_ids,
+                    "retrieval_mode": retrieval_meta.get("retrieval_mode"),
+                    "ocr_used": retrieval_meta.get("ocr_used"),
                     "vision_used": bool(image_payloads and can_use_vision),
                     "used_segment_id": segment.id,
                     "parent_segment_summary_used": parent_summary_used,
@@ -474,7 +500,8 @@ async def execute_orchestration(
 
         provenance_line = (
             f"[Orchestration Provenance] segment={segment.id}, assets={used_asset_ids or []}, "
-            f"images={image_asset_ids or []}, vision_used={bool(image_payloads and can_use_vision)}, routing_reason={routing_reason}, parent_summary_used={parent_summary_used}, "
+            f"images={image_asset_ids or []}, chunks={used_chunk_ids or []}, retrieval_mode={retrieval_meta.get('retrieval_mode')}, ocr_used={retrieval_meta.get('ocr_used')}, "
+            f"vision_used={bool(image_payloads and can_use_vision)}, routing_reason={routing_reason}, parent_summary_used={parent_summary_used}, "
             f"reviewer_decision={reviewer_decision}, critic_model={critic_model}, revised={revised}, gpu_enabled={gpu_enabled}"
         )
         final_text = f"{final_text}\n\n{provenance_line}"

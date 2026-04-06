@@ -53,6 +53,17 @@ type StreamEvent = {
   approval_status?: string | null;
 };
 
+type RetrievalHit = {
+  chunk_id: number;
+  asset_id: number;
+  filename: string;
+  chunk_index: number;
+  page?: number | null;
+  snippet: string;
+  score: number;
+  retrieval_mode: string;
+};
+
 export function ChatPanel() {
   const qc = useQueryClient();
   const selectedProjectId = useUiStore((s) => s.selectedProjectId);
@@ -74,6 +85,7 @@ export function ChatPanel() {
   const [divergence, setDivergence] = useState<DetectResponse | null>(null);
   const [liveEvents, setLiveEvents] = useState<StreamEvent[]>([]);
   const [requireApprovalBeforePublish, setRequireApprovalBeforePublish] = useState(false);
+  const [showRetrievalDebug, setShowRetrievalDebug] = useState(false);
 
   const queryScope = viewMode === 'segment' ? 'segment' : viewMode;
   const scopeQuery = viewMode === 'segment' && selectedSegmentId ? `&segment_id=${selectedSegmentId}` : '';
@@ -91,6 +103,11 @@ export function ChatPanel() {
     queryKey: ['assets', selectedChatId],
     queryFn: () => api.get<Asset[]>(`/assets/chat/${selectedChatId}`),
     enabled: !!selectedChatId
+  });
+  const { data: retrievalPreview } = useQuery({
+    queryKey: ['retrieval-preview', selectedChatId, selectedSegmentId, message],
+    queryFn: () => api.get<{ hits: RetrievalHit[] }>(`/assets/chat/${selectedChatId}/retrieval-preview?query=${encodeURIComponent(message)}${selectedSegmentId ? `&segment_id=${selectedSegmentId}` : ''}`),
+    enabled: !!selectedChatId && showRetrievalDebug && message.trim().length > 2,
   });
 
   const { data: segments = [] } = useQuery({
@@ -365,6 +382,13 @@ export function ChatPanel() {
             )}
             <div style={{ fontSize: 11, color: '#666' }}>{m.role} · seg#{m.segment_id ?? '-'} {m.model_name ? `· ${m.model_name}` : ''}</div>
             <div style={{ whiteSpace: 'pre-wrap', fontSize: 13 }}>{m.content_markdown}</div>
+            {m.role === 'assistant' && (
+              <div style={{ marginTop: 6, fontSize: 11, borderTop: '1px dashed #ddd', paddingTop: 6 }}>
+                {m.content_markdown.split('\n').filter((line) => line.startsWith('[Used ') || line.startsWith('[RAG Provenance]')).map((line, i) => (
+                  <div key={i}>{line}</div>
+                ))}
+              </div>
+            )}
             {m.role === 'assistant' && (generatedByMessage.get(m.id)?.length ?? 0) > 0 && (
               <div style={{ marginTop: 6, borderTop: '1px dashed #ddd', paddingTop: 6, fontSize: 11 }}>
                 <div>Generated Artifacts</div>
@@ -400,8 +424,33 @@ export function ChatPanel() {
           <div key={a.id} style={{ fontSize: 12, marginBottom: 4 }}>
             <a href={`${API_BASE}/assets/${a.id}/download`} target="_blank">{a.original_filename}</a>
             <small style={{ marginLeft: 6 }}>[{a.derived_metadata_json?.ingest_status ?? 'uploaded'}] chunks:{a.derived_metadata_json?.chunk_count ?? 0}</small>
+            <div style={{ fontSize: 11, color: '#555' }}>
+              uploaded={String(a.derived_metadata_json?.ingest_pipeline?.uploaded ?? true)} ·
+              extracted={String(a.derived_metadata_json?.ingest_pipeline?.extracted ?? false)} ·
+              chunked={String(a.derived_metadata_json?.ingest_pipeline?.chunked ?? false)} ·
+              embedded={String(a.derived_metadata_json?.ingest_pipeline?.embedded ?? false)} ·
+              indexed={String(a.derived_metadata_json?.ingest_pipeline?.indexed ?? false)} ·
+              ocr_fallback_used={String(a.derived_metadata_json?.ocr_fallback_used ?? false)} ·
+              failed={String(a.derived_metadata_json?.ingest_pipeline?.failed ?? false)}
+            </div>
           </div>
         ))}
+      </section>
+      <section style={{ border: '1px solid #eee', borderRadius: 6, padding: 8 }}>
+        <button type="button" style={{ fontSize: 12 }} onClick={() => setShowRetrievalDebug((v) => !v)}>
+          {showRetrievalDebug ? 'Hide' : 'Show'} Retrieval Preview
+        </button>
+        {showRetrievalDebug && (
+          <div style={{ marginTop: 6, fontSize: 11 }}>
+            {(retrievalPreview?.hits ?? []).map((hit) => (
+              <div key={hit.chunk_id} style={{ marginBottom: 4, borderBottom: '1px dashed #eee' }}>
+                asset#{hit.asset_id} {hit.filename} · chunk#{hit.chunk_id} idx={hit.chunk_index} page={hit.page ?? '-'} · score={hit.score}
+                <div>{hit.snippet}</div>
+              </div>
+            ))}
+            {(retrievalPreview?.hits ?? []).length === 0 && <small>No retrieval hits for current query.</small>}
+          </div>
+        )}
       </section>
 
       {usedAssetsLine && <div style={{ fontSize: 12, border: '1px solid #eee', padding: 6 }}>Used assets: {usedAssetsLine}</div>}
@@ -435,7 +484,8 @@ export function ChatPanel() {
               <div style={{ fontSize: 12 }}>
                 Routing reason: {runDetail?.run?.routing_reason ?? '-'} · reviewer: {runDetail?.run?.reviewer_decision ?? '-'} · parent summary used: {String(runDetail?.run?.parent_segment_summary_used ?? false)}
               </div>
-              <div style={{ fontSize: 12 }}>Used assets: {(runDetail?.run?.used_asset_ids ?? []).join(', ') || '-'} · image assets: {(runDetail?.run?.image_asset_ids ?? []).join(', ') || '-'} · vision used: {String(runDetail?.run?.vision_used ?? false)} · gpu enabled: {String(runDetail?.run?.gpu_enabled ?? true)}</div>
+              <div style={{ fontSize: 12 }}>Used assets: {(runDetail?.run?.used_asset_ids ?? []).join(', ') || '-'} · used chunks: {(runDetail?.run?.used_chunk_ids ?? []).join(', ') || '-'} · image assets: {(runDetail?.run?.image_asset_ids ?? []).join(', ') || '-'} · vision used: {String(runDetail?.run?.vision_used ?? false)} · gpu enabled: {String(runDetail?.run?.gpu_enabled ?? true)}</div>
+              <div style={{ fontSize: 12 }}>retrieval mode: {runDetail?.run?.retrieval_mode ?? '-'} · ocr used: {String(runDetail?.run?.ocr_used ?? false)}</div>
               <div style={{ fontSize: 12 }}>Critic model: {runDetail?.run?.critic_model ?? '-'} · critic summary: {runDetail?.run?.critic_summary ?? '-'}</div>
               <div style={{ fontSize: 12 }}>Approval: {runDetail?.run?.approval_status ?? '-'} · publish: {runDetail?.run?.final_publish_status ?? '-'}</div>
               {runDetail?.run?.pending_final_draft && (
@@ -459,9 +509,9 @@ export function ChatPanel() {
                       <div>input: {step.input_summary ?? '-'}</div>
                       <div>output: {step.output_summary ?? '-'}</div>
                       <div>routing_reason: {step.routing_reason ?? '-'} · reviewer_decision: {step.reviewer_decision ?? '-'} · execution_mode: {step.execution_mode ?? '-'}</div>
-                      <div>used_asset_ids: {(step.used_asset_ids ?? []).join(', ') || '-'} · image_asset_ids: {(step.image_asset_ids ?? []).join(', ') || '-'} · vision_used: {String(step.vision_used ?? false)}</div>
+                      <div>used_asset_ids: {(step.used_asset_ids ?? []).join(', ') || '-'} · used_chunk_ids: {(step.used_chunk_ids ?? []).join(', ') || '-'} · image_asset_ids: {(step.image_asset_ids ?? []).join(', ') || '-'} · vision_used: {String(step.vision_used ?? false)}</div>
                       <div>used_segment: {step.used_segment_id ?? '-'} · parent_summary_used: {String(step.parent_segment_summary_used ?? false)} · retry={step.retry_count ?? 0} · fallback={step.fallback_model_name ?? '-'}</div>
-                      <div>group={step.step_group ?? '-'} · depends_on={(step.depends_on_step_ids ?? []).join(', ') || '-'} · approval={step.approval_status ?? '-'}</div>
+                      <div>group={step.step_group ?? '-'} · depends_on={(step.depends_on_step_ids ?? []).join(', ') || '-'} · retrieval={step.retrieval_mode ?? '-'} · ocr={String(step.ocr_used ?? false)} · approval={step.approval_status ?? '-'}</div>
                     </li>
                   ))}
                 </ol>

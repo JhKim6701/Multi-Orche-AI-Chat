@@ -41,6 +41,7 @@ class OrchestrationStepOut(BaseModel):
     routing_reason: str | None = None
     reviewer_decision: str | None = None
     used_asset_ids: list[int] = Field(default_factory=list)
+    used_chunk_ids: list[int] = Field(default_factory=list)
     image_asset_ids: list[int] = Field(default_factory=list)
     vision_used: bool | None = None
     gpu_enabled: bool | None = None
@@ -49,7 +50,10 @@ class OrchestrationStepOut(BaseModel):
     step_group: str | None = None
     depends_on_step_ids: list[int] = Field(default_factory=list)
     execution_mode: str | None = None
+    retry_count: int = 0
     fallback_model_name: str | None = None
+    retrieval_mode: str | None = None
+    ocr_used: bool | None = None
     approval_required: bool | None = None
     approval_status: str | None = None
 

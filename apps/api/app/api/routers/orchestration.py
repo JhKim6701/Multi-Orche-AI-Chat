@@ -87,12 +87,15 @@ def run_detail(run_id: int, db: Session = Depends(get_db)):
     provenance = {
         "routing_reason": reviewer_meta.get("routing_reason"),
         "used_asset_ids": reviewer_meta.get("used_asset_ids", []),
+        "used_chunk_ids": reviewer_meta.get("used_chunk_ids", []),
         "used_segment_id": reviewer_meta.get("used_segment_id") or (user_msg.segment_id if user_msg else None),
         "parent_segment_summary_used": reviewer_meta.get("parent_segment_summary_used", False),
         "reviewer_decision": reviewer_decision,
         "image_asset_ids": reviewer_meta.get("image_asset_ids", []),
         "vision_used": reviewer_meta.get("vision_used", False),
         "gpu_enabled": reviewer_meta.get("gpu_enabled"),
+        "retrieval_mode": reviewer_meta.get("retrieval_mode"),
+        "ocr_used": reviewer_meta.get("ocr_used"),
         "critic_model": critic_step.model_name if critic_step else None,
         "critic_summary": critic_summary,
     }
@@ -113,6 +116,7 @@ def run_detail(run_id: int, db: Session = Depends(get_db)):
     ]
     final_provenance_summary = (
         f"routing={provenance['routing_reason']}, assets={provenance['used_asset_ids']}, "
+        f"chunks={provenance['used_chunk_ids']}, retrieval_mode={provenance['retrieval_mode']}, ocr_used={provenance['ocr_used']}, "
         f"images={provenance['image_asset_ids']}, vision_used={provenance['vision_used']}, "
         f"segment={provenance['used_segment_id']}, reviewer={reviewer_decision}, critic_model={provenance['critic_model']}, gpu_enabled={provenance['gpu_enabled']}, generated_artifacts={[a['id'] for a in artifact_summary]}"
     )
@@ -142,6 +146,7 @@ def run_detail(run_id: int, db: Session = Depends(get_db)):
             "current_active_step": active_step.step_name if active_step else None,
             "routing_reason": provenance["routing_reason"],
             "used_asset_ids": provenance["used_asset_ids"],
+            "used_chunk_ids": provenance["used_chunk_ids"],
             "used_segment_id": provenance["used_segment_id"],
             "parent_segment_summary_used": provenance["parent_segment_summary_used"],
             "reviewer_decision": reviewer_decision,
@@ -150,6 +155,8 @@ def run_detail(run_id: int, db: Session = Depends(get_db)):
             "vision_used": provenance["vision_used"],
             "image_asset_ids": provenance["image_asset_ids"],
             "gpu_enabled": provenance["gpu_enabled"],
+            "retrieval_mode": provenance["retrieval_mode"],
+            "ocr_used": provenance["ocr_used"],
             "critic_model": provenance["critic_model"],
             "critic_summary": provenance["critic_summary"],
             "approval_status": "pending" if run.status == "approval_pending" else ("rejected" if run.status == "rejected" else "approved"),
@@ -169,6 +176,7 @@ def run_detail(run_id: int, db: Session = Depends(get_db)):
                 routing_reason=_extract_meta(step.output_summary)[0].get("routing_reason"),
                 reviewer_decision=_extract_meta(step.output_summary)[0].get("reviewer_decision"),
                 used_asset_ids=_extract_meta(step.output_summary)[0].get("used_asset_ids", []),
+                used_chunk_ids=_extract_meta(step.output_summary)[0].get("used_chunk_ids", []),
                 image_asset_ids=_extract_meta(step.output_summary)[0].get("image_asset_ids", []),
                 vision_used=_extract_meta(step.output_summary)[0].get("vision_used"),
                 gpu_enabled=_extract_meta(step.output_summary)[0].get("gpu_enabled"),
@@ -178,6 +186,8 @@ def run_detail(run_id: int, db: Session = Depends(get_db)):
                 depends_on_step_ids=_extract_meta(step.output_summary)[0].get("depends_on_step_ids", []),
                 execution_mode=_extract_meta(step.output_summary)[0].get("execution_mode"),
                 fallback_model_name=_extract_meta(step.output_summary)[0].get("fallback_model_name"),
+                retrieval_mode=_extract_meta(step.output_summary)[0].get("retrieval_mode"),
+                ocr_used=_extract_meta(step.output_summary)[0].get("ocr_used"),
                 retry_count=_extract_meta(step.output_summary)[0].get("retry_count", 0),
                 approval_required=_extract_meta(step.output_summary)[0].get("approval_required"),
                 approval_status=_extract_meta(step.output_summary)[0].get("approval_status"),

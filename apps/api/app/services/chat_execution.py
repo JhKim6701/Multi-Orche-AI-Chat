@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Asset, ConversationSegment, Message, ModelRegistry, RoleEnum
 from app.services.artifact_manager import create_ai_generated_artifact
-from app.services.asset_ingestion import retrieve_relevant_context
+from app.services.asset_ingestion import pack_retrieval_context, retrieve_relevant_context
 from app.services.ollama_client import OllamaClient
 from app.services.runtime_state import get_gpu_enabled
 from app.services.topic_segmentation import maybe_start_new_segment, update_segment_summary
@@ -19,7 +19,10 @@ def _build_context_block(context_hits: list[dict]) -> str:
         return ""
     lines = ["참고 자산 컨텍스트:"]
     for hit in context_hits:
-        lines.append(f"- asset#{hit['asset_id']}({hit['filename']}): {hit['snippet']}")
+        lines.append(
+            f"- asset#{hit['asset_id']} chunk#{hit['chunk_id']} ({hit['filename']}) "
+            f"score={hit.get('score')} page={hit.get('page')}: {hit['snippet']}"
+        )
     return "\n".join(lines)
 
 
@@ -43,7 +46,7 @@ async def execute_chat(
     selected_model_names: list[str],
     execution_mode: str,
     message_asset_ids: list[int],
-) -> tuple[int, Message, list[Message]]:
+) -> tuple[int, Message, list[Message], dict]:
     selected_rows = db.scalars(
         select(ModelRegistry)
         .where(
@@ -89,7 +92,15 @@ async def execute_chat(
     image_payloads, image_asset_ids = _encode_image_assets(assets)
     has_images = bool(image_asset_ids)
 
-    context_hits = retrieve_relevant_context(db=db, chat_thread_id=chat_thread_id, query=content_markdown, limit=6)
+    context_hits = retrieve_relevant_context(
+        db=db,
+        chat_thread_id=chat_thread_id,
+        project_id=project_id,
+        segment_id=segment.id,
+        query=content_markdown,
+        limit=8,
+    )
+    packed_context, retrieval_meta = pack_retrieval_context(context_hits)
     context_block = _build_context_block(context_hits)
 
     history = db.scalars(
@@ -115,7 +126,8 @@ async def execute_chat(
         model_row = next((m for m in selected_rows if m.model_name == model_name), None)
         vision_allowed = bool(model_row and model_row.supports_vision)
         user_content = chain_input if execution_mode == "chained" else content_markdown
-        prompt = f"{user_content}\n\n{context_block}" if context_block else user_content
+        rag_prompt = packed_context or context_block
+        prompt = f"{user_content}\n\n{rag_prompt}" if rag_prompt else user_content
         if has_images and not vision_allowed:
             prompt = f"[Vision fallback: selected model has no vision capability or gpu is disabled]\n{prompt}"
         if not gpu_enabled and vision_allowed:
@@ -129,12 +141,18 @@ async def execute_chat(
         )
         answer = response.get("message", {}).get("content") or "(empty response)"
         if context_hits:
-            sources = ", ".join(f"#{h['asset_id']}:{h['filename']}" for h in context_hits[:3])
-            answer = f"{answer}\n\n[Used assets] {sources}"
+            sources = ", ".join(f"#{h['asset_id']}:{h['filename']}" for h in context_hits[:4])
+            chunk_refs = ", ".join(f"#{h['chunk_id']}(score={h['score']})" for h in context_hits[:6])
+            answer = f"{answer}\n\n[Used assets] {sources}\n[Used chunks] {chunk_refs}"
         if has_images:
             vision_tag = "vision_used" if vision_allowed else "vision_fallback_text_only"
             answer = f"{answer}\n[Image assets] ids={image_asset_ids} ({vision_tag})"
-        answer = f"{answer}\n[Routing] gpu_enabled={gpu_enabled}"
+        answer = (
+            f"{answer}\n[Routing] gpu_enabled={gpu_enabled}"
+            f"\n[RAG Provenance] mode={retrieval_meta.get('retrieval_mode')} "
+            f"assets={retrieval_meta.get('used_asset_ids')} chunks={retrieval_meta.get('used_chunk_ids')} "
+            f"ocr_used={retrieval_meta.get('ocr_used')} top_scores={retrieval_meta.get('top_scores')}"
+        )
 
         asst = Message(
             project_id=project_id,
@@ -170,4 +188,4 @@ async def execute_chat(
     db.refresh(user_msg)
     for message in assistant_messages:
         db.refresh(message)
-    return segment.id, user_msg, assistant_messages
+    return segment.id, user_msg, assistant_messages, retrieval_meta

@@ -94,8 +94,15 @@ class AssetChunk(Base):
     asset_id: Mapped[int] = mapped_column(ForeignKey("assets.id"), index=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
     chat_thread_id: Mapped[int] = mapped_column(ForeignKey("chat_threads.id"), index=True)
+    segment_id: Mapped[int | None] = mapped_column(ForeignKey("conversation_segments.id"), nullable=True, index=True)
     chunk_index: Mapped[int] = mapped_column(Integer)
     content_text: Mapped[str] = mapped_column(Text)
+    char_count: Mapped[int] = mapped_column(Integer, default=0)
+    token_count: Mapped[int] = mapped_column(Integer, default=0)
+    vector_id: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    embedding_model: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    embedding_vector_json: Mapped[list[float] | None] = mapped_column(JSON, nullable=True)
+    chunk_metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 

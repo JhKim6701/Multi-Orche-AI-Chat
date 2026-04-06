@@ -45,6 +45,15 @@ export interface Asset {
     ingest_status?: string;
     preview?: string;
     chunk_count?: number;
+    ingest_pipeline?: {
+      uploaded?: boolean;
+      extracted?: boolean;
+      chunked?: boolean;
+      embedded?: boolean;
+      indexed?: boolean;
+      failed?: boolean;
+    };
+    ocr_fallback_used?: boolean;
     kind?: string;
     artifact_summary?: string;
     generation_kind?: string;
@@ -74,6 +83,7 @@ export interface OrchestrationRun {
   current_active_step?: string | null;
   routing_reason?: string | null;
   used_asset_ids?: number[];
+  used_chunk_ids?: number[];
   used_segment_id?: number | null;
   parent_segment_summary_used?: boolean | null;
   reviewer_decision?: string | null;
@@ -82,6 +92,8 @@ export interface OrchestrationRun {
   vision_used?: boolean;
   image_asset_ids?: number[];
   gpu_enabled?: boolean;
+  retrieval_mode?: string | null;
+  ocr_used?: boolean | null;
   critic_model?: string | null;
   critic_summary?: string | null;
   approval_status?: string | null;
@@ -101,6 +113,7 @@ export interface OrchestrationStep {
   routing_reason?: string | null;
   reviewer_decision?: string | null;
   used_asset_ids?: number[];
+  used_chunk_ids?: number[];
   image_asset_ids?: number[];
   vision_used?: boolean | null;
   gpu_enabled?: boolean | null;
@@ -111,6 +124,8 @@ export interface OrchestrationStep {
   execution_mode?: string | null;
   retry_count?: number;
   fallback_model_name?: string | null;
+  retrieval_mode?: string | null;
+  ocr_used?: boolean | null;
   approval_required?: boolean | null;
   approval_status?: string | null;
 }

@@ -81,6 +81,8 @@ def test_orchestration_run_happy_path(monkeypatch):
     assert 'critic' in roles
     ctx_step = next(step for step in payload['steps'] if step['assigned_role'] == 'context_resolver')
     assert 'asset' in (ctx_step.get('input_summary') or '').lower() or 'asset' in (ctx_step.get('output_summary') or '').lower()
+    assert isinstance(ctx_step.get('used_chunk_ids', []), list)
+    assert ctx_step.get('retrieval_mode') is not None
     assert payload['final_message'] is not None
     assert 'final_provenance_summary' in payload['final_message']
 

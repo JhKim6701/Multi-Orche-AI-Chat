@@ -47,6 +47,8 @@ def test_execute_message_happy_path(monkeypatch):
     assert payload['user_message']['role'] == 'user'
     assert 'reply-from-model-a' in payload['assistant_messages'][0]['content_markdown']
     assert '[Used assets]' in payload['assistant_messages'][0]['content_markdown']
+    assert '[RAG Provenance]' in payload['assistant_messages'][0]['content_markdown']
+    assert payload['retrieval']['used_asset_ids']
 
 
 def test_multiple_model_ordered_execution(monkeypatch):

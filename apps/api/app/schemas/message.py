@@ -41,6 +41,7 @@ class MessageExecutionResult(BaseModel):
     used_segment_id: int
     user_message: MessageOut
     assistant_messages: list[MessageOut]
+    retrieval: dict | None = None
 
 
 class MessageScopeMeta(BaseModel):

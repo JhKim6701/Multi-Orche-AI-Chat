@@ -23,6 +23,28 @@ def test_asset_upload_happy_path(tmp_path, monkeypatch):
     res = client.post('/assets/upload', data=data, files=files)
     assert res.status_code == 200
     assert res.json()['original_filename'] == 'hello.txt'
+    asset_id = res.json()['id']
+    status = client.get(f'/assets/{asset_id}/ingestion-status')
+    assert status.status_code == 200
+    assert 'ingestion' in status.json()
+    chunks = client.get(f'/assets/{asset_id}/chunks')
+    assert chunks.status_code == 200
+    assert isinstance(chunks.json(), list)
+
+
+def test_retrieval_debug_endpoint_shape():
+    p = client.post('/projects', json={'name': 'asset-project-debug', 'description': None}).json()
+    c = client.post('/chats', json={'project_id': p['id'], 'title': 'asset-chat-debug'}).json()
+    files = {'file': ('guide.txt', b'deployment guide and troubleshooting checklist', 'text/plain')}
+    data = {'project_id': str(p['id']), 'chat_thread_id': str(c['id']), 'source_type': 'user_upload'}
+    upload = client.post('/assets/upload', data=data, files=files)
+    assert upload.status_code == 200
+    preview = client.get(f"/assets/chat/{c['id']}/retrieval-preview?query=checklist")
+    assert preview.status_code == 200
+    payload = preview.json()
+    assert 'hits' in payload
+    if payload['hits']:
+        assert {'chunk_id', 'asset_id', 'score'}.issubset(payload['hits'][0].keys())
 
 
 def test_model_toggle_and_sort(monkeypatch):

@@ -7,9 +7,9 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.session import get_db
-from app.models import Asset
+from app.models import Asset, AssetChunk, Message
 from app.schemas.asset import AssetOut
-from app.services.asset_ingestion import ingest_asset
+from app.services.asset_ingestion import ingest_asset, retrieve_relevant_context
 from app.utils.files import safe_join, sanitize_filename
 
 router = APIRouter(prefix="/assets", tags=["assets"])
@@ -65,6 +65,60 @@ def get_asset(asset_id: int, db: Session = Depends(get_db)):
     if not asset:
         raise HTTPException(status_code=404, detail="asset not found")
     return asset
+
+
+@router.get("/{asset_id}/ingestion-status")
+def get_ingestion_status(asset_id: int, db: Session = Depends(get_db)):
+    asset = db.get(Asset, asset_id)
+    if not asset:
+        raise HTTPException(status_code=404, detail="asset not found")
+    return {
+        "asset_id": asset.id,
+        "filename": asset.original_filename,
+        "mime_type": asset.mime_type,
+        "ingestion": (asset.derived_metadata_json or {}),
+    }
+
+
+@router.get("/{asset_id}/chunks")
+def list_asset_chunks(asset_id: int, db: Session = Depends(get_db)):
+    asset = db.get(Asset, asset_id)
+    if not asset:
+        raise HTTPException(status_code=404, detail="asset not found")
+    rows = (
+        db.query(AssetChunk)
+        .filter(AssetChunk.asset_id == asset_id)
+        .order_by(AssetChunk.chunk_index.asc())
+        .all()
+    )
+    return [
+        {
+            "id": row.id,
+            "asset_id": row.asset_id,
+            "chunk_index": row.chunk_index,
+            "segment_id": row.segment_id,
+            "char_count": row.char_count,
+            "token_count": row.token_count,
+            "vector_id": row.vector_id,
+            "metadata": row.chunk_metadata_json or {},
+            "snippet": row.content_text[:280],
+        }
+        for row in rows
+    ]
+
+
+@router.get("/chat/{chat_id}/retrieval-preview")
+def retrieval_preview(chat_id: int, query: str, segment_id: int | None = None, limit: int = 8, db: Session = Depends(get_db)):
+    project_id = db.scalar(select(Message.project_id).where(Message.chat_thread_id == chat_id).limit(1))
+    hits = retrieve_relevant_context(
+        db=db,
+        chat_thread_id=chat_id,
+        project_id=project_id,
+        segment_id=segment_id,
+        query=query,
+        limit=min(max(limit, 1), 20),
+    )
+    return {"query": query, "chat_thread_id": chat_id, "segment_id": segment_id, "hits": hits}
 
 
 @router.get("/{asset_id}/download")

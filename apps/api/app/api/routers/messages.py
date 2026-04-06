@@ -75,7 +75,7 @@ def create_user_message(payload: MessageCreate, db: Session = Depends(get_db)):
 @router.post("/execute", response_model=MessageExecutionResult)
 async def execute_message(payload: MessageExecutionRequest, db: Session = Depends(get_db)):
     try:
-        used_segment_id, user, assistants = await execute_chat(
+        used_segment_id, user, assistants, retrieval = await execute_chat(
             db=db,
             project_id=payload.project_id,
             chat_thread_id=payload.chat_thread_id,
@@ -88,7 +88,7 @@ async def execute_message(payload: MessageExecutionRequest, db: Session = Depend
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except OllamaUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    return MessageExecutionResult(used_segment_id=used_segment_id, user_message=user, assistant_messages=assistants)
+    return MessageExecutionResult(used_segment_id=used_segment_id, user_message=user, assistant_messages=assistants, retrieval=retrieval)
 
 
 @router.get("/stream")
