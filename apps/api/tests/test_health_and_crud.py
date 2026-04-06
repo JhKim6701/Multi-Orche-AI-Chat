@@ -37,7 +37,7 @@ def test_diagnostics_masking():
     assert runtime_info.status_code == 200
     info = runtime_info.json()
     assert info['sensitive_details_included'] is False
-    assert '***' in info['database_url'] or 'localhost' in info['database_url']
+    assert '***' in info['database_url']
 
 
 def test_project_chat_message_flow():

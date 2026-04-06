@@ -50,14 +50,12 @@ def _mask_url(raw: str, reveal: bool) -> str:
     if reveal:
         return raw
     parts = urlsplit(raw)
-    host = parts.hostname or "unknown"
     scheme = parts.scheme or ""
-    port = f":{parts.port}" if parts.port else ""
     path_tail = parts.path.rsplit("/", 1)[-1] if parts.path else ""
-    suffix = f"/{path_tail}" if path_tail else ""
-    if parts.username:
-        return f"{scheme}://***@{host}{port}{suffix}"
-    return f"{scheme}://{host}{port}{suffix}" if scheme else raw
+    suffix = f"/.../{path_tail}" if path_tail else ""
+    if not scheme:
+        return "***"
+    return f"{scheme}://***{suffix}"
 
 
 def _allow_sensitive(verbose: bool) -> bool:

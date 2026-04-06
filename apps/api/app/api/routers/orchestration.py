@@ -8,12 +8,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.models import Asset, ConversationSegment, Message, OrchestrationRun, OrchestrationStep, RoleEnum
+from app.models import Asset, ConversationSegment, Message, OrchestrationRun, OrchestrationStep
 from app.schemas.orchestration import OrchestrationRunCreate, OrchestrationRunDetail, OrchestrationRunOut, OrchestrationStepOut
 from app.services.approval_state import get_pending, mark_approved, mark_rejected
 from app.services.ollama_client import OllamaUnavailableError
 from app.services.orchestrator import execute_orchestration, publish_final_message_from_payload
-from app.services.topic_segmentation import update_segment_summary
 
 router = APIRouter(prefix="/orchestration", tags=["orchestration"])
 
@@ -214,7 +213,11 @@ def run_detail(run_id: int, db: Session = Depends(get_db)):
             "critic_summary": provenance["critic_summary"],
             "specialist_model": provenance["specialist_model"],
             "specialist_summary": provenance["specialist_summary"],
-            "approval_status": "pending" if run.status == "approval_pending" else ("rejected" if run.status == "rejected" else "approved"),
+            "approval_status": (
+                "pending"
+                if run.status == "approval_pending"
+                else ("rejected" if run.status == "rejected" else ("approved" if run.status == "completed" else "not_required"))
+            ),
             "pending_final_draft": (pending or {}).get("content_markdown") if pending else None,
             "execution_graph_summary": execution_graph_summary,
             "final_publish_status": "published" if run.final_message_id else ("pending" if run.status == "approval_pending" else run.status),
@@ -354,7 +357,6 @@ def approve_run(run_id: int, db: Session = Depends(get_db)):
     for step in db.scalars(select(OrchestrationStep).where(OrchestrationStep.orchestration_run_id == run_id)).all():
         if step.step_metadata_json and isinstance(step.step_metadata_json, dict):
             step.step_metadata_json["approval_status"] = "approved"
-    update_segment_summary(db, int(pending["segment_id"]))
     db.commit()
     return {"ok": True, "run_id": run_id, "final_message_id": final_message.id, "idempotent": bool(transition.idempotent)}
 
