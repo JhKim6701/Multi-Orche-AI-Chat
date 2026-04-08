@@ -160,6 +160,7 @@ npm run build:desktop
 관련 문서:
 - Runbook: `docs/runbooks/local_dev.md`
 - Backlog/Roadmap: `docs/roadmaps/release-candidate-backlog.md`
+- Post-merge branch plan: `docs/roadmaps/post-merge-branch-plan.md`
 
 ## Demo 최소 성공 시나리오
 

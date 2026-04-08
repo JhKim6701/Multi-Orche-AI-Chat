@@ -88,3 +88,4 @@
 참고:
 - `README.md`의 Merge / Release decision flow
 - `docs/roadmaps/release-candidate-backlog.md`
+- `docs/roadmaps/post-merge-branch-plan.md`
