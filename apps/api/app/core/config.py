@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -60,10 +60,6 @@ class Settings(BaseSettings):
     @property
     def runtime_state_file(self) -> Path:
         return Path(self.data_root) / "runtime_state.json"
-
-    @property
-    def pending_approval_file(self) -> Path:
-        return Path(self.data_root) / "pending_approvals.json"
 
 
 settings = Settings()

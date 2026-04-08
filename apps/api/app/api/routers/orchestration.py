@@ -42,6 +42,59 @@ def _step_meta(step: OrchestrationStep) -> tuple[dict, str | None]:
     return _extract_meta(step.output_summary)
 
 
+def _derive_approval_status(run: OrchestrationRun) -> str:
+    if run.approval_status:
+        return run.approval_status
+    if run.status == "approval_pending":
+        return "pending"
+    if run.status == "rejected":
+        return "rejected"
+    if run.status == "completed":
+        return "approved"
+    return "not_required"
+
+
+def _derive_final_publish_status(run: OrchestrationRun) -> str:
+    if run.final_message_id:
+        return "published"
+    if run.status == "approval_pending":
+        return "pending_approval"
+    if run.status == "rejected":
+        return "rejected"
+    if run.status == "failed":
+        return "failed"
+    return "not_published"
+
+
+def _event_payload(
+    run: OrchestrationRun,
+    event_type: str,
+    *,
+    segment_id: int | None = None,
+    **kwargs,
+) -> dict:
+    payload = {
+        "event_type": event_type,
+        "run_id": run.id,
+        "step_id": None,
+        "step_name": None,
+        "assigned_role": None,
+        "status": run.status,
+        "approval_status": _derive_approval_status(run),
+        "final_publish_status": _derive_final_publish_status(run),
+        "final_message_id": run.final_message_id,
+        "ended_at": run.ended_at.isoformat() if run.ended_at else None,
+        "model_name": None,
+        "fallback_model_name": None,
+        "fallback_reason": None,
+        "retry_count": 0,
+        "segment_id": segment_id,
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+    payload.update(kwargs)
+    return payload
+
+
 @router.post("/run", response_model=OrchestrationRunOut)
 async def run_orchestration(payload: OrchestrationRunCreate, db: Session = Depends(get_db)):
     content = payload.content_markdown
@@ -150,7 +203,7 @@ def run_detail(run_id: int, db: Session = Depends(get_db)):
         f"images={provenance['image_asset_ids']}, vision_used={provenance['vision_used']}, "
         f"segment={provenance['used_segment_id']}, reviewer={reviewer_decision}, critic_model={provenance['critic_model']}, gpu_enabled={provenance['gpu_enabled']}, generated_artifacts={[a['id'] for a in artifact_summary]}"
     )
-    pending = run.pending_payload_json
+    pending = run.pending_payload_json if _derive_approval_status(run) == "pending" else None
     parallel_groups = {}
     for step in steps:
         meta, _ = _step_meta(step)
@@ -231,12 +284,10 @@ def run_detail(run_id: int, db: Session = Depends(get_db)):
             "critic_summary": provenance["critic_summary"],
             "specialist_model": provenance["specialist_model"],
             "specialist_summary": provenance["specialist_summary"],
-            "approval_status": run.approval_status or (
-                "pending" if run.status == "approval_pending" else ("rejected" if run.status == "rejected" else ("approved" if run.status == "completed" else "not_required"))
-            ),
+            "approval_status": _derive_approval_status(run),
             "pending_final_draft": (pending or {}).get("content_markdown") if pending else None,
             "execution_graph_summary": execution_graph_summary,
-            "final_publish_status": "published" if run.final_message_id else ("pending" if run.status == "approval_pending" else run.status),
+            "final_publish_status": _derive_final_publish_status(run),
         },
         steps=step_payloads,
         final_message=(
@@ -297,49 +348,47 @@ def stream_run_events(run_id: int, db: Session = Depends(get_db)):
     user_msg = db.get(Message, run.user_message_id)
     segment_id = user_msg.segment_id if user_msg else None
 
-    def payload(event_type: str, **kwargs):
-        base = {
-            "event_type": event_type,
-            "run_id": run_id,
-            "step_id": None,
-            "step_name": None,
-            "assigned_role": None,
-            "status": run.status,
-            "model_name": None,
-            "fallback_model_name": None,
-            "fallback_reason": None,
-            "retry_count": 0,
-            "segment_id": segment_id,
-            "approval_status": None,
-            "timestamp": datetime.utcnow().isoformat(),
-        }
-        base.update(kwargs)
-        return json.dumps(base, ensure_ascii=False)
+    def serialize(payload: dict) -> str:
+        return json.dumps(payload, ensure_ascii=False)
 
     async def live_gen():
-        async for evt in stream_events(run_id):
-            yield f"event: {evt.get('event_type', 'step')}\ndata: {json.dumps(evt, ensure_ascii=False)}\n\n"
+        snapshot = _event_payload(
+            run,
+            "run_snapshot",
+            segment_id=segment_id,
+            status=run.status,
+            approval_status=_derive_approval_status(run),
+        )
+        async for evt in stream_events(run_id, initial_event=snapshot):
+            payload = _event_payload(
+                run,
+                evt.get("event_type", "step"),
+                segment_id=segment_id,
+                **{k: v for k, v in evt.items() if k != "event_type"},
+            )
+            yield f"event: {payload['event_type']}\ndata: {serialize(payload)}\n\n"
 
     def replay_gen():
-        yield f"event: run_started\ndata: {payload('run_started', status=run.status)}\n\n"
+        yield f"event: run_snapshot\ndata: {serialize(_event_payload(run, 'run_snapshot', segment_id=segment_id, status=run.status))}\n\n"
+        yield f"event: run_started\ndata: {serialize(_event_payload(run, 'run_started', segment_id=segment_id, status=run.status))}\n\n"
         for step in steps:
             meta, _ = _step_meta(step)
             start_type, done_type = step_event_names(step)
             if meta.get("retry_count", 0):
-                yield f"event: retry_started\ndata: {payload('retry_started', step_id=step.id, step_name=step.step_name, status='retrying', model_name=step.model_name, retry_count=meta.get('retry_count'))}\n\n"
+                yield f"event: retry_started\ndata: {serialize(_event_payload(run, 'retry_started', segment_id=segment_id, step_id=step.id, step_name=step.step_name, status='retrying', model_name=step.model_name, retry_count=meta.get('retry_count')))}\n\n"
             if meta.get("fallback_model_name"):
-                yield f"event: fallback_started\ndata: {payload('fallback_started', step_id=step.id, step_name=step.step_name, assigned_role=step.assigned_role, status='fallback', model_name=step.model_name, fallback_model_name=meta.get('fallback_model_name'), fallback_reason=meta.get('fallback_reason'))}\n\n"
-            yield f"event: {start_type}\ndata: {payload(start_type, step_id=step.id, step_name=step.step_name, assigned_role=step.assigned_role, status='running', model_name=step.model_name, reviewer_decision=meta.get('reviewer_decision'))}\n\n"
+                yield f"event: fallback_started\ndata: {serialize(_event_payload(run, 'fallback_started', segment_id=segment_id, step_id=step.id, step_name=step.step_name, assigned_role=step.assigned_role, status='fallback', model_name=step.model_name, fallback_model_name=meta.get('fallback_model_name'), fallback_reason=meta.get('fallback_reason')))}\n\n"
+            yield f"event: {start_type}\ndata: {serialize(_event_payload(run, start_type, segment_id=segment_id, step_id=step.id, step_name=step.step_name, assigned_role=step.assigned_role, status='running', model_name=step.model_name, reviewer_decision=meta.get('reviewer_decision')))}\n\n"
             if step.status == "failed":
-                yield f"event: step_failed\ndata: {payload('step_failed', step_id=step.id, step_name=step.step_name, assigned_role=step.assigned_role, status='failed', model_name=step.model_name, fallback_model_name=meta.get('fallback_model_name'), retry_count=meta.get('retry_count', 0), approval_status=meta.get('approval_status'))}\n\n"
+                yield f"event: step_failed\ndata: {serialize(_event_payload(run, 'step_failed', segment_id=segment_id, step_id=step.id, step_name=step.step_name, assigned_role=step.assigned_role, status='failed', model_name=step.model_name, fallback_model_name=meta.get('fallback_model_name'), retry_count=meta.get('retry_count', 0), approval_status=meta.get('approval_status')))}\n\n"
             else:
-                yield f"event: {done_type}\ndata: {payload(done_type, step_id=step.id, step_name=step.step_name, assigned_role=step.assigned_role, status=step.status, model_name=step.model_name, reviewer_decision=meta.get('reviewer_decision'), vision_used=meta.get('vision_used'), image_asset_ids=meta.get('image_asset_ids', []), gpu_enabled=meta.get('gpu_enabled'), fallback_model_name=meta.get('fallback_model_name'), fallback_reason=meta.get('fallback_reason'), retry_count=meta.get('retry_count', 0), approval_status=meta.get('approval_status'))}\n\n"
+                yield f"event: {done_type}\ndata: {serialize(_event_payload(run, done_type, segment_id=segment_id, step_id=step.id, step_name=step.step_name, assigned_role=step.assigned_role, status=step.status, model_name=step.model_name, reviewer_decision=meta.get('reviewer_decision'), vision_used=meta.get('vision_used'), image_asset_ids=meta.get('image_asset_ids', []), gpu_enabled=meta.get('gpu_enabled'), fallback_model_name=meta.get('fallback_model_name'), fallback_reason=meta.get('fallback_reason'), retry_count=meta.get('retry_count', 0), approval_status=meta.get('approval_status')))}\n\n"
         if run.status == "approval_pending":
-            yield f"event: approval_pending\ndata: {payload('approval_pending', run_id=run_id, approval_status='pending')}\n\n"
+            yield f"event: approval_pending\ndata: {serialize(_event_payload(run, 'approval_pending', segment_id=segment_id, approval_status='pending', status='approval_pending'))}\n\n"
         end_event = "run_completed" if run.status == "completed" else "run_failed"
         if run.status == "rejected":
             end_event = "run_rejected"
-        yield f"event: {end_event}\ndata: {payload(end_event, status=run.status, final_message_id=run.final_message_id)}\n\n"
+        yield f"event: {end_event}\ndata: {serialize(_event_payload(run, end_event, segment_id=segment_id, status=run.status, final_message_id=run.final_message_id))}\n\n"
 
     if run.status in {"running", "approval_pending"}:
         return StreamingResponse(live_gen(), media_type="text/event-stream")
@@ -353,6 +402,10 @@ def approve_run(run_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="run not found")
     if run.status == "completed" and run.final_message_id:
         return {"ok": True, "run_id": run_id, "final_message_id": run.final_message_id, "idempotent": True}
+    if run.status == "rejected":
+        raise HTTPException(status_code=409, detail="approval_state_inconsistent: run already rejected")
+    if run.status not in {"approval_pending", "running"}:
+        raise HTTPException(status_code=409, detail=f"approval_state_inconsistent: invalid status {run.status}")
 
     pending = run.pending_payload_json
     if not pending:
@@ -366,6 +419,9 @@ def approve_run(run_id: int, db: Session = Depends(get_db)):
     run.approval_status = "approved"
     run.pending_payload_json = None
     run.approval_decided_at = datetime.utcnow()
+    run.status = "completed"
+    if run.ended_at is None:
+        run.ended_at = datetime.utcnow()
     db.commit()
     return {"ok": True, "run_id": run_id, "final_message_id": final_message.id, "idempotent": False}
 
@@ -379,6 +435,8 @@ def reject_run(run_id: int, db: Session = Depends(get_db)):
         return {"ok": True, "run_id": run_id, "status": "rejected", "idempotent": True}
     if run.status == "completed":
         raise HTTPException(status_code=400, detail="already published; cannot reject")
+    if run.status not in {"approval_pending", "running"}:
+        raise HTTPException(status_code=409, detail=f"approval_state_inconsistent: invalid status {run.status}")
 
     if run.pending_payload_json is None:
         raise HTTPException(status_code=409, detail="approval_state_inconsistent: no pending approval")

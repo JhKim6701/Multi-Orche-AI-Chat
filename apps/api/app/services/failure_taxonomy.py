@@ -30,7 +30,7 @@ def recovery_hint(category: str) -> str:
         "ingestion_failure": "파일 형식/권한과 OCR·chunking 파이프라인 로그를 확인하세요.",
         "retrieval_empty": "retrieval scope(세그먼트/채팅)와 query를 조정해보세요.",
         "routing_fallback": "모델 capabilities와 enabled/downloaded 상태를 확인하세요.",
-        "approval_state_inconsistent": "승인 상태 저장소와 DB run 상태를 점검하고, run detail 재조회 후 approve/reject를 다시 시도하세요.",
+        "approval_state_inconsistent": "DB run 승인 상태를 점검하고, run detail 재조회 후 approve/reject를 다시 시도하세요.",
         "desktop_runtime_misconfigured": "desktop 모드(env/config)와 doctor 결과를 확인하세요.",
         "runtime_error": "로그와 diagnostics 패널을 확인 후 재시도하세요.",
     }.get(category, "로그와 diagnostics 패널을 확인 후 재시도하세요.")

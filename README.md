@@ -43,6 +43,9 @@ cp infrastructure/env/.env.example .env
 docker compose -f infrastructure/compose/docker-compose.yml up -d
 ```
 
+- 기본 런타임 우선순위는 **PostgreSQL + Qdrant + Host Ollama** 입니다.
+- SQLite는 빠른 로컬 실험용 fallback이며, 단일 프로세스 dev 상황에서만 권장됩니다.
+
 ### 3) API 실행
 
 ```bash
@@ -86,9 +89,9 @@ npm run build:desktop
 
 ## Desktop/Web 실행 모드와 의존성
 
-- **Web 모드**: `MOAC_ENV=dev` + API를 별도로 실행한 뒤 `npm run dev`.
-- **Desktop 모드**: `MOAC_ENV=desktop` 권장. 기본 data root는 `~/.multi-orche-ai-chat/data`로 고정되어 OS별 사용자 홈 경로에 저장됨.
-- 현재 구조는 **Tauri 프론트 패키징 + 백엔드 별도 로컬 서비스 실행** 방식을 사용.
+- **Web 모드**: `MOAC_ENV=dev` + API 백엔드를 별도 프로세스로 실행한 뒤 `npm run dev`.
+- **Desktop 모드**: `MOAC_ENV=desktop` 권장. 기본 data root는 `~/.multi-orche-ai-chat/data`이며, 프론트(Tauri)와 백엔드는 별도 로컬 프로세스로 동작.
+- 현재 구조는 **Tauri 프론트 패키징 + 백엔드 별도 프로세스 실행** 전제를 사용.
 - 선행 의존성:
   - API 서버 (`uvicorn app.main:app`)
   - Ollama (`MOAC_OLLAMA_BASE_URL`)
@@ -100,7 +103,7 @@ npm run build:desktop
 - `MOAC_DATA_ROOT` (기본: dev=`./data`, desktop=`~/.multi-orche-ai-chat/data`)
 - 업로드/생성 산출물: `${MOAC_UPLOAD_ROOT}` (기본 `${MOAC_DATA_ROOT}/uploads`)
 - 런타임 상태: `${MOAC_DATA_ROOT}/runtime_state.json`
-- 승인 대기 상태: `${MOAC_DATA_ROOT}/pending_approvals.json`
+- 승인 대기/결정 상태는 `orchestration_runs.approval_status`, `pending_payload_json`, `approval_decided_at` DB 필드가 source of truth.
 
 ## 핵심 API
 

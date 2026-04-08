@@ -22,6 +22,7 @@ def test_invalid_env_handling():
 def test_runtime_state_path_safety(tmp_path: Path):
     s = Settings(env='dev', data_root=str(tmp_path / 'state-root'))
     assert str(s.runtime_state_file).startswith(str(Path(s.data_root)))
+    assert not hasattr(s, "pending_approval_file")
 
 
 def test_artifact_data_path_write(tmp_path: Path):

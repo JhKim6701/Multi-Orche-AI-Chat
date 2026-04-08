@@ -9,7 +9,10 @@ from typing import Any
 
 
 class AtomicJsonFileStore:
-    """Thread-safe JSON file store backed by atomic replace writes."""
+    """Thread-safe JSON file store backed by atomic replace writes.
+
+    현재는 runtime_state(gpu toggle) persistence 용도로만 사용한다.
+    """
 
     def __init__(self, file_path: Path, default_data: dict[str, Any] | None = None):
         self.file_path = file_path

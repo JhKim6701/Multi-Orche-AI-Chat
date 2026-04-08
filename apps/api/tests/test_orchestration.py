@@ -1,5 +1,6 @@
 import time
 import asyncio
+import json
 
 from fastapi.testclient import TestClient
 
@@ -67,6 +68,18 @@ def _wait_run(run_id: int, timeout: float = 3.0):
                 return detail.json()
         time.sleep(0.05)
     return client.get(f'/orchestration/runs/{run_id}').json()
+
+
+def _sse_events(body: str) -> list[tuple[str, dict]]:
+    events: list[tuple[str, dict]] = []
+    current_event = None
+    for line in body.splitlines():
+        if line.startswith("event: "):
+            current_event = line.replace("event: ", "", 1).strip()
+        if line.startswith("data: ") and current_event:
+            events.append((current_event, json.loads(line.replace("data: ", "", 1))))
+            current_event = None
+    return events
 
 
 def test_orchestration_run_happy_path(monkeypatch):
@@ -460,3 +473,115 @@ def test_structured_step_metadata_compatibility(monkeypatch):
     detail2 = client.get(f'/orchestration/runs/{run_id}').json()
     first_step = detail2['steps'][0]
     assert first_step['routing_reason'] == 'legacy-route'
+
+
+def test_run_status_matrix_and_contract(monkeypatch):
+    _seed_model(monkeypatch)
+    monkeypatch.setattr(OllamaClient, 'chat', _mock_chat)
+    p = client.post('/projects', json={'name': 'orch-matrix-p', 'description': None}).json()
+    c = client.post('/chats', json={'project_id': p['id'], 'title': 'orch-matrix-c'}).json()
+
+    completed_run = client.post('/orchestration/run', json={
+        'project_id': p['id'],
+        'chat_thread_id': c['id'],
+        'content_markdown': 'completed case',
+        'selected_model_names': ['orch-model'],
+    }).json()['id']
+    completed = _wait_run(completed_run)
+    assert completed['run']['status'] == 'completed'
+    assert completed['run']['approval_status'] in {'approved', 'not_required'}
+    assert completed['run']['final_publish_status'] == 'published'
+
+    pending_run = client.post('/orchestration/run', json={
+        'project_id': p['id'],
+        'chat_thread_id': c['id'],
+        'content_markdown': 'pending case',
+        'selected_model_names': ['orch-model'],
+        'require_approval_before_publish': True,
+    }).json()['id']
+    pending = _wait_run(pending_run)
+    assert pending['run']['status'] == 'approval_pending'
+    assert pending['run']['approval_status'] == 'pending'
+    assert pending['run']['final_publish_status'] == 'pending_approval'
+
+    assert client.post(f'/orchestration/runs/{pending_run}/approve').status_code == 200
+    approved = _wait_run(pending_run)
+    assert approved['run']['status'] == 'completed'
+    assert approved['run']['approval_status'] == 'approved'
+    assert approved['run']['final_publish_status'] == 'published'
+
+    rejected_run = client.post('/orchestration/run', json={
+        'project_id': p['id'],
+        'chat_thread_id': c['id'],
+        'content_markdown': 'rejected case',
+        'selected_model_names': ['orch-model'],
+        'require_approval_before_publish': True,
+    }).json()['id']
+    assert client.post(f'/orchestration/runs/{rejected_run}/reject').status_code == 200
+    rejected = _wait_run(rejected_run)
+    assert rejected['run']['status'] == 'rejected'
+    assert rejected['run']['approval_status'] == 'rejected'
+    assert rejected['run']['final_publish_status'] == 'rejected'
+
+
+def test_stream_late_subscriber_receives_snapshot(monkeypatch):
+    _seed_model(monkeypatch)
+    monkeypatch.setattr(OllamaClient, 'chat', _mock_chat)
+    p = client.post('/projects', json={'name': 'orch-late-stream-p', 'description': None}).json()
+    c = client.post('/chats', json={'project_id': p['id'], 'title': 'orch-late-stream-c'}).json()
+    run_id = client.post('/orchestration/run', json={
+        'project_id': p['id'],
+        'chat_thread_id': c['id'],
+        'content_markdown': 'late subscriber stream check',
+        'selected_model_names': ['orch-model'],
+    }).json()['id']
+    _wait_run(run_id)
+
+    stream = client.get(f'/orchestration/runs/{run_id}/stream')
+    events = _sse_events(stream.text)
+    assert events[0][0] == 'run_snapshot'
+    first_payload = events[0][1]
+    assert {'status', 'approval_status', 'final_publish_status', 'final_message_id'}.issubset(first_payload.keys())
+
+
+def test_run_detail_stream_payload_consistency(monkeypatch):
+    _seed_model(monkeypatch)
+    monkeypatch.setattr(OllamaClient, 'chat', _mock_chat)
+    p = client.post('/projects', json={'name': 'orch-consistency-p', 'description': None}).json()
+    c = client.post('/chats', json={'project_id': p['id'], 'title': 'orch-consistency-c'}).json()
+    run_id = client.post('/orchestration/run', json={
+        'project_id': p['id'],
+        'chat_thread_id': c['id'],
+        'content_markdown': 'detail and stream consistency check',
+        'selected_model_names': ['orch-model'],
+    }).json()['id']
+    detail = _wait_run(run_id)
+    stream = client.get(f'/orchestration/runs/{run_id}/stream')
+    events = _sse_events(stream.text)
+    terminal = events[-1][1]
+    assert terminal['status'] == detail['run']['status']
+    assert terminal['approval_status'] == detail['run']['approval_status']
+    assert terminal['final_publish_status'] == detail['run']['final_publish_status']
+    assert terminal['final_message_id'] == detail['run']['final_message_id']
+
+
+def test_failed_run_contract(monkeypatch):
+    _seed_model(monkeypatch)
+
+    async def _fail(self, model_name: str, messages: list[dict], images=None, options=None):
+        raise RuntimeError("forced failure for contract")
+
+    monkeypatch.setattr(OllamaClient, 'chat', _fail)
+    p = client.post('/projects', json={'name': 'orch-failed-contract-p', 'description': None}).json()
+    c = client.post('/chats', json={'project_id': p['id'], 'title': 'orch-failed-contract-c'}).json()
+    run_id = client.post('/orchestration/run', json={
+        'project_id': p['id'],
+        'chat_thread_id': c['id'],
+        'content_markdown': 'fail contract',
+        'selected_model_names': ['orch-model'],
+    }).json()['id']
+    detail = _wait_run(run_id)
+    assert detail['run']['status'] == 'failed'
+    assert detail['run']['ended_at'] is not None
+    assert detail['run']['final_message_id'] is None
+    assert detail['run']['final_publish_status'] == 'failed'
