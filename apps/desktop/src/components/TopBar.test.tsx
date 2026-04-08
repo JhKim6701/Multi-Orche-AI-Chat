@@ -20,7 +20,7 @@ beforeEach(() => {
         status: 'degraded',
         mode: 'desktop',
         env: 'desktop',
-        checks: { database: { ok: true }, ollama: { ok: false }, qdrant: { ok: true }, upload_root: { ok: true, path: '/tmp' } },
+        checks: { database: { ok: true }, ollama: { ok: false }, qdrant: { ok: true }, upload_root: { ok: true, path: '/tmp' }, migration: { ok: true } },
         unresolved_dependencies: ['ollama'],
         doctor_hint: 'run npm run doctor',
       }),
@@ -37,6 +37,7 @@ test('renders readiness and recovery hint', async () => {
 
   expect(await screen.findByText(/startup=blocked/i)).toBeTruthy();
   expect(await screen.findByText(/runtime=degraded/i)).toBeTruthy();
+  expect(await screen.findByText(/migration=ok/i)).toBeTruthy();
   expect(await screen.findByText(/Desktop preflight/i)).toBeTruthy();
   expect(await screen.findByText(/run npm run doctor/i)).toBeTruthy();
 });

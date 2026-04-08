@@ -12,6 +12,7 @@ function normalizeChecks(payload) {
     ollama: Boolean(checks.ollama?.ok),
     qdrant: Boolean(checks.qdrant?.ok),
     upload_root: Boolean(checks.upload_root?.ok),
+    migration: Boolean(checks.migration?.ok),
   };
 }
 
@@ -22,6 +23,7 @@ function renderChecklist(checks) {
     ['ollama', checks.ollama],
     ['qdrant', checks.qdrant],
     ['upload_root', checks.upload_root],
+    ['migration', checks.migration],
   ];
   return labels.map(([name, ok]) => `[doctor] ${name}: ${status(ok)}`);
 }

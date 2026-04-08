@@ -11,7 +11,7 @@ def test_health():
     payload = r.json()
     assert payload['status'] in {'ok', 'degraded'}
     assert 'checks' in payload
-    assert {'database', 'ollama', 'qdrant', 'upload_root'}.issubset(payload['checks'].keys())
+    assert {'database', 'ollama', 'qdrant', 'upload_root', 'migration'}.issubset(payload['checks'].keys())
     assert 'unresolved_dependencies' in payload
     assert 'doctor_hint' in payload
 

@@ -19,6 +19,7 @@ test('runDoctor prints readiness and recovery hint', async () => {
             ollama: { ok: false },
             qdrant: { ok: true },
             upload_root: { ok: true },
+            migration: { ok: true },
           },
         }),
       };

@@ -48,3 +48,19 @@
 3. `/system/health` 확인 (실행 중 상태)
 4. unresolved dependency 순서대로 복구 (backend → DB → Ollama → Qdrant)
 5. UI(TopBar/ChatPanel)에서 recovery hint 확인 후 재시도
+
+## 8) Known issues / limitations
+
+- Tauri 앱 번들만으로 backend/orchestration은 동작하지 않음 (backend 별도 프로세스 필수).
+- Ollama/Qdrant/DB 의존성 중 하나라도 실패하면 orchestration/retrieval은 degraded.
+- dev(`MOAC_ENV=dev`)와 desktop 운영 경로(`MOAC_ENV=desktop`)는 데이터 루트/운영 가정이 다름.
+- doctor는 preflight 진단 도구이며 자동 복구 도구가 아님.
+
+## 9) RC 직전 운영 체크리스트
+
+1. `.env` 및 `MOAC_*` 확인
+2. `docker compose ... up -d`
+3. `cd apps/api && alembic upgrade head`
+4. `cd apps/api && uvicorn app.main:app --reload --port 8000`
+5. `cd apps/desktop && npm run doctor`
+6. `npm run tauri:dev` 또는 `npm run build:desktop`

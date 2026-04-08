@@ -39,6 +39,18 @@ def _check_upload_root() -> tuple[bool, str]:
         return False, str(exc)
 
 
+def _check_migration() -> tuple[bool, str]:
+    try:
+        db = SessionLocal()
+        version = db.execute(text("SELECT version_num FROM alembic_version LIMIT 1")).scalar()
+        db.close()
+        if not version:
+            return False, "missing version row"
+        return True, str(version)
+    except Exception as exc:
+        return False, str(exc)
+
+
 def _mask_path(path: str, reveal: bool) -> str:
     if reveal:
         return path
@@ -82,6 +94,7 @@ async def health(client_mode: str | None = None, verbose: bool = False):
     ollama = await OllamaClient().health_check()
     db_ok, db_msg = _check_db()
     upload_ok, upload_msg = _check_upload_root()
+    migration_ok, migration_msg = _check_migration()
     qdrant_ok = QdrantStore().health()
     runtime = _runtime_surface(verbose=verbose)
 
@@ -94,6 +107,7 @@ async def health(client_mode: str | None = None, verbose: bool = False):
             "path": runtime["upload_root"],
             "detail": upload_msg if runtime["sensitive_details_included"] else ("ok" if upload_ok else "error"),
         },
+        "migration": {"ok": migration_ok, "detail": migration_msg if runtime["sensitive_details_included"] else ("ok" if migration_ok else "error")},
     }
     overall = all(v.get("ok") for v in checks.values())
     unresolved = [name for name, info in checks.items() if not info.get("ok")]

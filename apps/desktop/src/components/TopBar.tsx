@@ -28,6 +28,7 @@ type Health = {
     ollama: { ok: boolean };
     qdrant: { ok: boolean };
     upload_root: { ok: boolean; path: string };
+    migration: { ok: boolean };
   };
   unresolved_dependencies?: string[];
   doctor_hint?: string;
@@ -85,6 +86,7 @@ export function TopBar() {
             <Badge variant={health?.checks?.database?.ok ? 'success' : 'danger'}>db={health?.checks?.database?.ok ? 'ok' : 'down'}</Badge>
             <Badge variant={health?.checks?.ollama?.ok ? 'success' : 'danger'}>ollama={health?.checks?.ollama?.ok ? 'ok' : 'down'}</Badge>
             <Badge variant={health?.checks?.qdrant?.ok ? 'success' : 'danger'}>qdrant={health?.checks?.qdrant?.ok ? 'ok' : 'down'}</Badge>
+            <Badge variant={health?.checks?.migration?.ok ? 'success' : 'danger'}>migration={health?.checks?.migration?.ok ? 'ok' : 'check'}</Badge>
             <Button size="sm" variant="outline" onClick={() => { refetchHealth(); refetchHw(); refetchReadiness(); }}>Retry checks</Button>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -99,7 +101,7 @@ export function TopBar() {
           </div>
           <div className="rounded border border-dashed bg-white/70 p-2 text-[11px] text-slate-700">
             <div className="font-medium">Desktop preflight (before run)</div>
-            <div>Backend={health?.checks?.database?.ok ? 'ready' : 'check'} · Ollama={health?.checks?.ollama?.ok ? 'ready' : 'check'} · Qdrant={health?.checks?.qdrant?.ok ? 'ready' : 'check'} · DB={health?.checks?.database?.ok ? 'ready' : 'check'}</div>
+            <div>Backend={health?.checks?.database?.ok ? 'ready' : 'check'} · Ollama={health?.checks?.ollama?.ok ? 'ready' : 'check'} · Qdrant={health?.checks?.qdrant?.ok ? 'ready' : 'check'} · DB={health?.checks?.database?.ok ? 'ready' : 'check'} · Migration={health?.checks?.migration?.ok ? 'ready' : 'check'}</div>
             <div>upload_root={health?.checks?.upload_root?.ok ? 'writable' : 'not-writable'} · runtime_gpu={runtime?.gpu_enabled ? 'on' : 'off'}</div>
           </div>
           {degraded && (

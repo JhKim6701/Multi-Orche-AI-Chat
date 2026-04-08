@@ -125,6 +125,27 @@ npm run build:desktop
    - DB/Postgres
 5. ChatPanel/TopBar의 degraded alert 및 recovery hint 확인 후 재시도
 
+## Known issues / current limitations
+
+- 현재 릴리스 후보 구조는 **Tauri 번들만으로 완결 실행되지 않으며**, backend가 별도 프로세스로 반드시 필요합니다.
+- Ollama/Qdrant/DB 중 하나라도 비가용이면 orchestration 또는 retrieval 기능은 부분/전체 degraded 상태가 됩니다.
+- dev 경로(`MOAC_ENV=dev`)는 단일 프로세스 실험 친화적이며, production-like 운영 경로(`MOAC_ENV=desktop` + 외부 의존성 상시 기동)와 차이가 있습니다.
+- desktop doctor는 preflight를 빠르게 알려주지만, 네트워크/권한/성능 병목의 모든 원인을 자동 복구하지는 않습니다.
+- UI는 release candidate 수준으로 정리되었지만, 아주 긴 타임라인/대용량 asset 상황에서 추가 UX 폴리싱 여지가 남아 있습니다.
+
+## Release candidate 체크리스트 (packaging/ops)
+
+1. 환경 변수 준비 (`.env`, `MOAC_*` 우선순위 확인)
+2. 인프라 기동 (`postgres`, `qdrant`, `ollama`)
+3. migration 적용 (`alembic upgrade head`)
+4. backend 실행 (`uvicorn app.main:app --reload --port 8000`)
+5. desktop preflight (`cd apps/desktop && npm run doctor`)
+6. 실행 경로 선택
+   - web dev: `npm run dev`
+   - tauri dev: `npm run tauri:dev`
+   - build: `npm run build:desktop`
+7. 장애 시 복구 순서 적용 (readiness → health → dependency restart)
+
 ## 핵심 API
 
 - `POST /projects`, `GET /projects`
