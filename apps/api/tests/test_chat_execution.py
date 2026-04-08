@@ -80,6 +80,56 @@ def test_multiple_model_ordered_execution(monkeypatch):
     assert assistant_messages[1]['model_name'] == 'model-a'
 
 
+def test_execution_mode_semantics_are_distinct(monkeypatch):
+    calls = []
+
+    async def _capture(self, model_name: str, messages: list[dict], images=None, options=None):
+        calls.append({'model': model_name, 'prompt': messages[-1]['content']})
+        return {'message': {'content': f'reply-{model_name}'}}
+
+    monkeypatch.setattr(OllamaClient, 'chat', _capture)
+    _setup_models(monkeypatch)
+
+    p = client.post('/projects', json={'name': 'mode-semantics-project', 'description': None}).json()
+    c = client.post('/chats', json={'project_id': p['id'], 'title': 'mode-semantics-chat'}).json()
+
+    client.post('/messages/execute', json={
+        'project_id': p['id'],
+        'chat_thread_id': c['id'],
+        'content_markdown': 'base question',
+        'selected_model_names': ['model-a', 'model-b'],
+        'execution_mode': 'independent',
+        'message_asset_ids': [],
+    })
+    independent_prompts = [c['prompt'] for c in calls[-2:]]
+
+    client.post('/messages/execute', json={
+        'project_id': p['id'],
+        'chat_thread_id': c['id'],
+        'content_markdown': 'base question',
+        'selected_model_names': ['model-a', 'model-b'],
+        'execution_mode': 'chained',
+        'message_asset_ids': [],
+    })
+    chained_prompts = [c['prompt'] for c in calls[-2:]]
+
+    client.post('/messages/execute', json={
+        'project_id': p['id'],
+        'chat_thread_id': c['id'],
+        'content_markdown': 'base question',
+        'selected_model_names': ['model-a', 'model-b'],
+        'execution_mode': 'ordered',
+        'message_asset_ids': [],
+    })
+    ordered_prompts = [c['prompt'] for c in calls[-2:]]
+
+    assert independent_prompts[0] == independent_prompts[1]
+    assert chained_prompts[0] != chained_prompts[1]
+    assert ordered_prompts[0] != ordered_prompts[1]
+    assert 'base question' in ordered_prompts[1]
+    assert '[Ordered reference from previous model]' in ordered_prompts[1]
+
+
 def test_execute_message_ollama_unavailable(monkeypatch):
     async def _raise(self, *args, **kwargs):
         from app.services.ollama_client import OllamaUnavailableError

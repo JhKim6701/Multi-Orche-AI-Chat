@@ -121,11 +121,17 @@ async def execute_chat(
     client = OllamaClient()
     assistant_messages: list[Message] = []
     chain_input = content_markdown
+    ordered_reference = ""
 
     for idx, model_name in enumerate(execution_models):
         model_row = next((m for m in selected_rows if m.model_name == model_name), None)
         vision_allowed = bool(model_row and model_row.supports_vision)
-        user_content = chain_input if execution_mode == "chained" else content_markdown
+        if execution_mode == "chained":
+            user_content = chain_input
+        elif execution_mode == "ordered" and ordered_reference:
+            user_content = f"{content_markdown}\n\n[Ordered reference from previous model]\n{ordered_reference}"
+        else:
+            user_content = content_markdown
         rag_prompt = packed_context or context_block
         prompt = f"{user_content}\n\n{rag_prompt}" if rag_prompt else user_content
         if has_images and not vision_allowed:
@@ -182,6 +188,8 @@ async def execute_chat(
         context_messages.append({"role": "assistant", "content": answer})
         if execution_mode == "chained":
             chain_input = answer
+        elif execution_mode == "ordered":
+            ordered_reference = answer
 
     update_segment_summary(db, segment.id)
     db.commit()

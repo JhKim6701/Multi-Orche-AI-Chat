@@ -11,12 +11,12 @@ from sqlalchemy.orm import Session
 
 from app.models import Asset, ConversationSegment, Message, ModelRegistry, OrchestrationRun, OrchestrationStep, RoleEnum
 from app.orchestration.state import OrchestrationState
-from app.services.approval_state import set_pending
 from app.services.artifact_manager import create_ai_generated_artifact
 from app.services.asset_ingestion import pack_retrieval_context, retrieve_relevant_context
 from app.services.ollama_client import OllamaClient
 from app.services.runtime_state import get_gpu_enabled
 from app.services.topic_segmentation import maybe_start_new_segment, update_segment_summary
+from app.orchestration.events import step_event_names
 
 
 @dataclass
@@ -36,6 +36,7 @@ class OrchestrationRuntime:
         orchestrator_model_name: str | None,
         message_asset_ids: list[int],
         require_approval_before_publish: bool,
+        emit_event=None,
     ):
         self.db = db
         self.project_id = project_id
@@ -47,6 +48,7 @@ class OrchestrationRuntime:
         self.require_approval_before_publish = require_approval_before_publish
         self.client = OllamaClient()
         self.run: OrchestrationRun | None = None
+        self.emit_event = emit_event
 
     @staticmethod
     def summarize(text: str, limit: int = 220) -> str:
@@ -99,6 +101,7 @@ class OrchestrationRuntime:
             status="running",
             graph_name="langgraph_orchestrator_v1",
             started_at=datetime.utcnow(),
+            approval_status="pending" if self.require_approval_before_publish else "not_required",
         )
         self.db.add(run)
         self.db.flush()
@@ -203,6 +206,21 @@ class OrchestrationRuntime:
         )
         self.db.add(step)
         self.db.flush()
+        if self.emit_event:
+            started_event, _ = step_event_names(step)
+            self.emit_event(
+                {
+                    "event_type": started_event,
+                    "run_id": self.run.id,
+                    "step_id": step.id,
+                    "step_name": step.step_name,
+                    "assigned_role": step.assigned_role,
+                    "status": "running",
+                    "model_name": step.model_name,
+                    "retry_count": 0,
+                    "approval_status": "pending" if self.require_approval_before_publish else "not_required",
+                }
+            )
         return StepContext(step=step, depends_on=depends_on or [])
 
     def close_step(self, ctx: StepContext, output: str, meta: dict[str, Any], retry_count: int = 0) -> int:
@@ -218,6 +236,23 @@ class OrchestrationRuntime:
         }
         ctx.step.ended_at = datetime.utcnow()
         self.db.flush()
+        if self.emit_event:
+            _, done_event = step_event_names(ctx.step)
+            self.emit_event(
+                {
+                    "event_type": done_event,
+                    "run_id": self.run.id,
+                    "step_id": ctx.step.id,
+                    "step_name": ctx.step.step_name,
+                    "assigned_role": ctx.step.assigned_role,
+                    "status": "completed",
+                    "model_name": ctx.step.model_name,
+                    "retry_count": retry_count,
+                    "fallback_model_name": meta.get("fallback_model_name"),
+                    "fallback_reason": meta.get("fallback_reason"),
+                    "approval_status": "pending" if self.require_approval_before_publish else "not_required",
+                }
+            )
         return ctx.step.id
 
     async def chat_with_retry(self, model_name: str, prompt: str) -> tuple[str, int, str | None, str | None, str]:
@@ -268,18 +303,19 @@ class OrchestrationRuntime:
     def mark_approval_pending(self, state: OrchestrationState) -> None:
         self.run.status = "approval_pending"  # type: ignore[union-attr]
         self.run.ended_at = None  # type: ignore[union-attr]
-        set_pending(
-            self.run.id,  # type: ignore[union-attr]
-            {
-                "project_id": state["project_id"],
-                "chat_thread_id": state["chat_thread_id"],
-                "segment_id": state["segment_id"],
-                "content_markdown": state["final_text"],
-                "model_name": state["model_name"],
-                "model_role": state["model_role"],
-                "approval_status": "pending",
-            },
-        )
+        pending_payload = {
+            "project_id": state["project_id"],
+            "chat_thread_id": state["chat_thread_id"],
+            "segment_id": state["segment_id"],
+            "content_markdown": state["final_text"],
+            "model_name": state["model_name"],
+            "model_role": state["model_role"],
+            "approval_status": "pending",
+        }
+        self.run.approval_status = "pending"  # type: ignore[union-attr]
+        self.run.pending_payload_json = pending_payload  # type: ignore[union-attr]
+        if self.emit_event:
+            self.emit_event({"event_type": "approval_pending", "run_id": self.run.id, "status": "approval_pending", "approval_status": "pending"})
 
     def finalize_run_status(self, status: str) -> None:
         self.run.status = status  # type: ignore[union-attr]
@@ -315,6 +351,9 @@ class OrchestrationRuntime:
         msg.plain_text_cache = msg.content_markdown
         self.run.final_message_id = msg.id  # type: ignore[union-attr]
         self.finalize_run_status("completed")
+        self.run.approval_status = "approved" if self.require_approval_before_publish else self.run.approval_status  # type: ignore[union-attr]
+        self.run.pending_payload_json = None  # type: ignore[union-attr]
+        self.run.approval_decided_at = datetime.utcnow() if self.require_approval_before_publish else self.run.approval_decided_at  # type: ignore[union-attr]
         update_segment_summary(self.db, state["segment_id"])
         return msg
 

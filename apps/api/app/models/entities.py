@@ -135,6 +135,9 @@ class OrchestrationRun(Base):
     started_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     final_message_id: Mapped[int | None] = mapped_column(ForeignKey("messages.id"), nullable=True)
+    approval_status: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    pending_payload_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    approval_decided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class OrchestrationStep(Base):

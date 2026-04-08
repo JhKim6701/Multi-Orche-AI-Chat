@@ -10,10 +10,11 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models import Asset, ConversationSegment, Message, OrchestrationRun, OrchestrationStep
 from app.orchestration.events import step_event_names
+from app.orchestration.runner import launch_run, stream_events
 from app.schemas.orchestration import OrchestrationRunCreate, OrchestrationRunDetail, OrchestrationRunOut, OrchestrationStepOut
-from app.services.approval_state import get_pending, mark_approved, mark_rejected
 from app.services.ollama_client import OllamaUnavailableError
-from app.services.orchestrator import execute_orchestration, publish_final_message_from_payload
+from app.orchestration.adapters import OrchestrationRuntime
+from app.services.orchestrator import publish_final_message_from_payload
 
 router = APIRouter(prefix="/orchestration", tags=["orchestration"])
 
@@ -51,7 +52,7 @@ async def run_orchestration(payload: OrchestrationRunCreate, db: Session = Depen
         raise HTTPException(status_code=400, detail="content_markdown 또는 user_message_id가 필요합니다.")
 
     try:
-        run = await execute_orchestration(
+        runtime = OrchestrationRuntime(
             db=db,
             project_id=payload.project_id,
             chat_thread_id=payload.chat_thread_id,
@@ -60,6 +61,22 @@ async def run_orchestration(payload: OrchestrationRunCreate, db: Session = Depen
             orchestrator_model_name=payload.orchestrator_model_name,
             message_asset_ids=payload.message_asset_ids,
             require_approval_before_publish=payload.require_approval_before_publish,
+        )
+        state = await runtime.bootstrap()
+        run = runtime.run
+        db.commit()
+        db.refresh(run)
+        launch_run(
+            state,
+            runtime_kwargs={
+                "project_id": payload.project_id,
+                "chat_thread_id": payload.chat_thread_id,
+                "content_markdown": content,
+                "selected_model_names": payload.selected_model_names,
+                "orchestrator_model_name": payload.orchestrator_model_name,
+                "message_asset_ids": payload.message_asset_ids,
+                "require_approval_before_publish": payload.require_approval_before_publish,
+            },
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -133,7 +150,7 @@ def run_detail(run_id: int, db: Session = Depends(get_db)):
         f"images={provenance['image_asset_ids']}, vision_used={provenance['vision_used']}, "
         f"segment={provenance['used_segment_id']}, reviewer={reviewer_decision}, critic_model={provenance['critic_model']}, gpu_enabled={provenance['gpu_enabled']}, generated_artifacts={[a['id'] for a in artifact_summary]}"
     )
-    pending = get_pending(run_id)
+    pending = run.pending_payload_json
     parallel_groups = {}
     for step in steps:
         meta, _ = _step_meta(step)
@@ -214,10 +231,8 @@ def run_detail(run_id: int, db: Session = Depends(get_db)):
             "critic_summary": provenance["critic_summary"],
             "specialist_model": provenance["specialist_model"],
             "specialist_summary": provenance["specialist_summary"],
-            "approval_status": (
-                "pending"
-                if run.status == "approval_pending"
-                else ("rejected" if run.status == "rejected" else ("approved" if run.status == "completed" else "not_required"))
+            "approval_status": run.approval_status or (
+                "pending" if run.status == "approval_pending" else ("rejected" if run.status == "rejected" else ("approved" if run.status == "completed" else "not_required"))
             ),
             "pending_final_draft": (pending or {}).get("content_markdown") if pending else None,
             "execution_graph_summary": execution_graph_summary,
@@ -301,7 +316,11 @@ def stream_run_events(run_id: int, db: Session = Depends(get_db)):
         base.update(kwargs)
         return json.dumps(base, ensure_ascii=False)
 
-    def gen():
+    async def live_gen():
+        async for evt in stream_events(run_id):
+            yield f"event: {evt.get('event_type', 'step')}\ndata: {json.dumps(evt, ensure_ascii=False)}\n\n"
+
+    def replay_gen():
         yield f"event: run_started\ndata: {payload('run_started', status=run.status)}\n\n"
         for step in steps:
             meta, _ = _step_meta(step)
@@ -322,7 +341,9 @@ def stream_run_events(run_id: int, db: Session = Depends(get_db)):
             end_event = "run_rejected"
         yield f"event: {end_event}\ndata: {payload(end_event, status=run.status, final_message_id=run.final_message_id)}\n\n"
 
-    return StreamingResponse(gen(), media_type="text/event-stream")
+    if run.status in {"running", "approval_pending"}:
+        return StreamingResponse(live_gen(), media_type="text/event-stream")
+    return StreamingResponse(replay_gen(), media_type="text/event-stream")
 
 
 @router.post("/runs/{run_id}/approve")
@@ -333,20 +354,20 @@ def approve_run(run_id: int, db: Session = Depends(get_db)):
     if run.status == "completed" and run.final_message_id:
         return {"ok": True, "run_id": run_id, "final_message_id": run.final_message_id, "idempotent": True}
 
-    pending = get_pending(run_id)
+    pending = run.pending_payload_json
     if not pending:
         raise HTTPException(status_code=409, detail="approval_state_inconsistent: no pending approval")
 
     final_message = publish_final_message_from_payload(db=db, run=run, payload=pending)
-    transition = mark_approved(run_id, final_message.id)
-    if transition.status not in {"approved"}:
-        raise HTTPException(status_code=409, detail="approval_state_inconsistent: failed to mark approval")
 
     for step in db.scalars(select(OrchestrationStep).where(OrchestrationStep.orchestration_run_id == run_id)).all():
         if step.step_metadata_json and isinstance(step.step_metadata_json, dict):
             step.step_metadata_json["approval_status"] = "approved"
+    run.approval_status = "approved"
+    run.pending_payload_json = None
+    run.approval_decided_at = datetime.utcnow()
     db.commit()
-    return {"ok": True, "run_id": run_id, "final_message_id": final_message.id, "idempotent": bool(transition.idempotent)}
+    return {"ok": True, "run_id": run_id, "final_message_id": final_message.id, "idempotent": False}
 
 
 @router.post("/runs/{run_id}/reject")
@@ -359,16 +380,16 @@ def reject_run(run_id: int, db: Session = Depends(get_db)):
     if run.status == "completed":
         raise HTTPException(status_code=400, detail="already published; cannot reject")
 
-    transition = mark_rejected(run_id)
-    if transition.status == "missing":
+    if run.pending_payload_json is None:
         raise HTTPException(status_code=409, detail="approval_state_inconsistent: no pending approval")
-    if transition.status not in {"rejected"}:
-        raise HTTPException(status_code=409, detail="approval_state_inconsistent: invalid approval state transition")
 
     run.status = "rejected"
     run.ended_at = datetime.utcnow()
+    run.approval_status = "rejected"
+    run.pending_payload_json = None
+    run.approval_decided_at = datetime.utcnow()
     for step in db.scalars(select(OrchestrationStep).where(OrchestrationStep.orchestration_run_id == run_id)).all():
         if step.step_metadata_json and isinstance(step.step_metadata_json, dict):
             step.step_metadata_json["approval_status"] = "rejected"
     db.commit()
-    return {"ok": True, "run_id": run_id, "status": "rejected", "idempotent": bool(transition.idempotent)}
+    return {"ok": True, "run_id": run_id, "status": "rejected", "idempotent": False}

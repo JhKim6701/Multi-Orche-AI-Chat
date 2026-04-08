@@ -1,3 +1,6 @@
+import time
+import asyncio
+
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -54,6 +57,18 @@ def _seed_model_with_vision(monkeypatch):
     assert client.post('/models/sync').status_code == 200
 
 
+def _wait_run(run_id: int, timeout: float = 3.0):
+    started = time.time()
+    while time.time() - started < timeout:
+        detail = client.get(f'/orchestration/runs/{run_id}')
+        if detail.status_code == 200:
+            status = detail.json()['run']['status']
+            if status in {'completed', 'failed', 'approval_pending', 'rejected'}:
+                return detail.json()
+        time.sleep(0.05)
+    return client.get(f'/orchestration/runs/{run_id}').json()
+
+
 def test_orchestration_run_happy_path(monkeypatch):
     _seed_model(monkeypatch)
     monkeypatch.setattr(OllamaClient, 'chat', _mock_chat)
@@ -74,9 +89,7 @@ def test_orchestration_run_happy_path(monkeypatch):
     assert run.status_code == 200
     run_id = run.json()['id']
 
-    detail = client.get(f'/orchestration/runs/{run_id}')
-    assert detail.status_code == 200
-    payload = detail.json()
+    payload = _wait_run(run_id)
     assert payload['run']['status'] == 'completed'
     assert payload['run']['graph_name'] == 'langgraph_orchestrator_v1'
     roles = [s['assigned_role'] for s in payload['steps']]
@@ -143,6 +156,35 @@ def test_orchestration_stream_payload_shape(monkeypatch):
     assert 'specialist_completed' in body or 'specialist_started' in body
 
 
+def test_live_stream_emits_runtime_events(monkeypatch):
+    _seed_model(monkeypatch)
+
+    async def _slow_chat(self, model_name: str, messages: list[dict], images=None, options=None):
+        await asyncio.sleep(0.01)
+        prompt = messages[-1]["content"]
+        if "decision: approve|revise|append_missing_points" in prompt:
+            return {'message': {'content': 'decision: approve'}}
+        return {'message': {'content': f'[{model_name}] {prompt[:20]}'}}
+
+    monkeypatch.setattr(OllamaClient, 'chat', _slow_chat)
+    p = client.post('/projects', json={'name': 'orch-live-p', 'description': None}).json()
+    c = client.post('/chats', json={'project_id': p['id'], 'title': 'orch-live-c'}).json()
+    run = client.post('/orchestration/run', json={
+        'project_id': p['id'],
+        'chat_thread_id': c['id'],
+        'content_markdown': 'live stream check',
+        'selected_model_names': ['orch-model']
+    })
+    assert run.status_code == 200
+    run_id = run.json()['id']
+    stream = client.get(f'/orchestration/runs/{run_id}/stream')
+    assert stream.status_code == 200
+    text = stream.text
+    assert 'event: run_started' in text
+    assert 'event: step_started' in text or 'event: reviewer_started' in text
+    assert 'event: run_completed' in text or 'event: run_failed' in text
+
+
 def test_orchestration_observability_shape(monkeypatch):
     _seed_model(monkeypatch)
     monkeypatch.setattr(OllamaClient, 'chat', _mock_chat)
@@ -178,7 +220,7 @@ def test_orchestration_reviewer_happy_path(monkeypatch):
     assert run.status_code == 200
 
     run_id = run.json()['id']
-    detail = client.get(f'/orchestration/runs/{run_id}').json()
+    detail = _wait_run(run_id)
     assert detail['run']['reviewer_decision'] == 'approve'
     assert any(step['step_name'] == 'reviewer_critic' for step in detail['steps'])
     assert any(step['step_name'] == 'critic_debate' for step in detail['steps'])
@@ -220,7 +262,7 @@ def test_orchestration_detail_includes_artifact_metadata(monkeypatch):
         'selected_model_names': ['orch-model']
     })
     assert run.status_code == 200
-    detail = client.get(f"/orchestration/runs/{run.json()['id']}").json()
+    detail = _wait_run(run.json()['id'])
     assert len(detail['run']['generated_artifact_ids']) >= 1
     assert isinstance(detail['run']['artifact_summary'], list)
 
@@ -255,7 +297,7 @@ def test_orchestration_vision_path_with_image(monkeypatch):
     })
     assert run.status_code == 200
     assert any(call['images'] for call in calls)
-    detail = client.get(f"/orchestration/runs/{run.json()['id']}").json()
+    detail = _wait_run(run.json()['id'])
     assert detail['run']['vision_used'] is True
     assert image_upload['id'] in detail['run']['image_asset_ids']
 
@@ -273,7 +315,7 @@ def test_retry_and_fallback_metadata(monkeypatch):
         'selected_model_names': ['orch-model', 'llava-vision']
     })
     assert run.status_code == 200
-    detail = client.get(f"/orchestration/runs/{run.json()['id']}").json()
+    detail = _wait_run(run.json()['id'])
     assert any((step.get('retry_count') or 0) >= 1 for step in detail['steps'])
 
 
@@ -292,13 +334,13 @@ def test_approval_pending_approve_reject(monkeypatch):
     })
     assert run.status_code == 200
     run_id = run.json()['id']
-    detail = client.get(f'/orchestration/runs/{run_id}').json()
+    detail = _wait_run(run_id)
     assert detail['run']['approval_status'] == 'pending'
     assert detail['run']['pending_final_draft'] is not None
 
     approve = client.post(f'/orchestration/runs/{run_id}/approve')
     assert approve.status_code == 200
-    detail2 = client.get(f'/orchestration/runs/{run_id}').json()
+    detail2 = _wait_run(run_id)
     assert detail2['run']['final_publish_status'] == 'published'
     assert detail2['final_message'] is not None
     assert detail2['run']['generated_artifact_ids']
@@ -314,7 +356,7 @@ def test_approval_pending_approve_reject(monkeypatch):
     run2_id = run2.json()['id']
     reject = client.post(f'/orchestration/runs/{run2_id}/reject')
     assert reject.status_code == 200
-    detail3 = client.get(f'/orchestration/runs/{run2_id}').json()
+    detail3 = _wait_run(run2_id)
     assert detail3['run']['approval_status'] == 'rejected'
 
 
