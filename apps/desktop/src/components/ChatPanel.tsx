@@ -168,7 +168,7 @@ export function ChatPanel() {
 
   const { data: runDetail } = useQuery({
     queryKey: ['orchestration-run-detail', selectedRunId],
-    queryFn: () => api.get<{ run: OrchestrationRun & { final_message_id?: number; segment_id?: number; generated_artifact_ids?: number[]; artifact_summary?: Array<{ id: number; filename: string; producing_model?: string; producing_role?: string }>; vision_used?: boolean; image_asset_ids?: number[]; approval_status?: string; pending_final_draft?: string; execution_graph_summary?: { parallel_groups?: Record<string, number[]>; step_count?: number }; final_publish_status?: string }; steps: OrchestrationStep[]; final_message?: { content_markdown: string; final_provenance_summary?: string; generated_artifact_ids?: number[] } }>(`/orchestration/runs/${selectedRunId}`),
+    queryFn: () => api.get<{ run: OrchestrationRun & { final_message_id?: number; segment_id?: number; generated_artifact_ids?: number[]; artifact_summary?: Array<{ id: number; filename: string; producing_model?: string; producing_role?: string }>; vision_used?: boolean; image_asset_ids?: number[]; approval_status?: string; pending_final_draft?: string; execution_graph_summary?: { parallel_groups?: Record<string, number[]>; step_count?: number }; final_publish_status?: string }; steps: OrchestrationStep[]; final_message?: { content_markdown: string; model_name?: string; model_role?: string; final_provenance_summary?: string; generated_artifact_ids?: number[] } }>(`/orchestration/runs/${selectedRunId}`),
     enabled: !!selectedRunId && orchestratorOn,
     refetchInterval: orchestratorOn ? 3000 : false,
   });
@@ -565,6 +565,9 @@ export function ChatPanel() {
               </div>
               <div style={{ fontSize: 12 }}>
                 Actual run · routing={runDetail?.run?.routing_reason ?? '-'} · reviewer_decision={runDetail?.run?.reviewer_decision ?? '-'} · critic_model={runDetail?.run?.critic_model ?? '-'} · specialist_model={runDetail?.run?.specialist_model ?? '-'}
+              </div>
+              <div style={{ fontSize: 12 }}>
+                Final responder model={runDetail?.final_message?.model_name ?? '-'} (default={rolePreferenceByRole.final_responder?.default_model_name ?? '-'})
               </div>
               <div style={{ fontSize: 12 }}>Approval: {runDetail?.run?.approval_status ?? '-'} · publish: {runDetail?.run?.final_publish_status ?? '-'}</div>
               {runDetail?.run?.pending_final_draft && (

@@ -120,6 +120,20 @@ export function ModelPanel() {
     const next = exists ? current.filter((name) => name !== modelName) : [...current, modelName];
     updateRolePreferenceMutation.mutate({ role, preferredModelNames: next });
   };
+  const setRoleDefault = (role: OrchestrationRole, modelName: string) => {
+    const current = rolePreferenceIndex[role]?.preferred_model_names ?? [];
+    const next = [modelName, ...current.filter((name) => name !== modelName)];
+    updateRolePreferenceMutation.mutate({ role, preferredModelNames: next });
+  };
+  const moveRoleOrder = (role: OrchestrationRole, modelName: string, delta: -1 | 1) => {
+    const current = [...(rolePreferenceIndex[role]?.preferred_model_names ?? [])];
+    const idx = current.indexOf(modelName);
+    if (idx < 0) return;
+    const target = idx + delta;
+    if (target < 0 || target >= current.length) return;
+    [current[idx], current[target]] = [current[target], current[idx]];
+    updateRolePreferenceMutation.mutate({ role, preferredModelNames: current });
+  };
 
   return (
     <aside style={{ padding: 8, height: '100%', overflow: 'auto', borderLeft: '1px solid #eee' }}>
@@ -206,7 +220,20 @@ export function ModelPanel() {
                   <div style={{ fontSize: 11, color: '#999' }}>no preferred candidates</div>
                 ) : (
                   candidates.map((candidate) => (
-                    <label key={`${role}-${candidate.model_name}`} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, marginTop: 2 }}>
+                    <div
+                      key={`${role}-${candidate.model_name}`}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4,
+                        fontSize: 11,
+                        marginTop: 2,
+                        background: candidate.is_default ? '#ecfdf3' : candidate.is_fallback ? '#fff7ed' : candidate.is_preferred ? '#f5f5f5' : '#fff',
+                        border: '1px solid #eee',
+                        borderRadius: 4,
+                        padding: '2px 4px',
+                      }}
+                    >
                       <input
                         aria-label={`role-${role}-${candidate.model_name}`}
                         type="checkbox"
@@ -215,9 +242,20 @@ export function ModelPanel() {
                         disabled={updateRolePreferenceMutation.isPending}
                       />
                       <span>{candidate.model_name}</span>
+                      {candidate.is_default && <Badge label="default" />}
+                      {candidate.is_fallback && <Badge label="fallback" />}
+                      {!candidate.is_preferred && <Badge label="candidate" />}
+                      <Badge label={`cap:${candidate.capability_score}`} />
                       <Badge label={`priority:${candidate.priority}`} />
                       <Badge label={candidate.enabled ? 'enabled' : 'disabled'} />
-                    </label>
+                      <button style={{ fontSize: 10 }} onClick={() => setRoleDefault(role, candidate.model_name)} disabled={updateRolePreferenceMutation.isPending}>set default</button>
+                      {candidate.is_preferred && (
+                        <>
+                          <button style={{ fontSize: 10 }} onClick={() => moveRoleOrder(role, candidate.model_name, -1)} disabled={updateRolePreferenceMutation.isPending}>↑pref</button>
+                          <button style={{ fontSize: 10 }} onClick={() => moveRoleOrder(role, candidate.model_name, 1)} disabled={updateRolePreferenceMutation.isPending}>↓pref</button>
+                        </>
+                      )}
+                    </div>
                   ))
                 )}
               </div>

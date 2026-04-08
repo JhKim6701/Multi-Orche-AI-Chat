@@ -46,3 +46,10 @@ class RoleCandidateOut(BaseModel):
     downloaded: bool
     enabled: bool
     priority: int
+    capability_score: int
+    is_preferred: bool
+    is_default: bool
+    is_fallback: bool
+    supports_vision: bool
+    supports_reasoning: bool
+    supports_embeddings: bool

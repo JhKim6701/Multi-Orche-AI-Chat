@@ -43,9 +43,11 @@ const rolePrefs = [
 ];
 
 let failPut = false;
+let lastPutBody: any = null;
 
 beforeEach(() => {
   failPut = false;
+  lastPutBody = null;
   useUiStore.setState({
     orchestratorOn: true,
     selectedModelNames: ['m1'],
@@ -55,11 +57,16 @@ beforeEach(() => {
   } as any);
   (global as any).fetch = vi.fn((url: string, init?: RequestInit) => {
     if (url.includes('/models/role-preferences') && init?.method === 'PUT') {
+      lastPutBody = init.body ? JSON.parse(init.body as string) : null;
       if (failPut) return Promise.resolve({ ok: false, statusText: 'bad request', json: async () => ({ detail: 'failed' }) });
       return Promise.resolve(ok({ role: 'orchestrator', preferred_model_names: ['m1'], default_model_name: 'm1', fallback_model_names: [] }));
     }
     if (url.includes('/models/role-preferences')) return Promise.resolve(ok(rolePrefs));
-    if (url.includes('/models/role-candidates/')) return Promise.resolve(ok([{ model_name: 'm1', downloaded: true, enabled: true, priority: 0 }]));
+    if (url.includes('/models/role-candidates/'))
+      return Promise.resolve(ok([
+        { model_name: 'm1', downloaded: true, enabled: true, priority: 0, capability_score: 8, is_preferred: true, is_default: true, is_fallback: false, supports_vision: false, supports_reasoning: true, supports_embeddings: true },
+        { model_name: 'm2', downloaded: true, enabled: true, priority: 1, capability_score: 6, is_preferred: false, is_default: false, is_fallback: false, supports_vision: true, supports_reasoning: false, supports_embeddings: false },
+      ]));
     if (url.includes('/system/runtime-info')) return Promise.resolve(ok({ env: 'dev', mode: 'web', data_root: 'd', upload_root: 'u', database_url: 'db', qdrant_url: 'q', ollama_base_url: 'o', gpu_enabled: true }));
     if (url.includes('/models/sync')) return Promise.resolve(ok(models));
     if (url.includes('/models')) return Promise.resolve(ok(models));
@@ -118,4 +125,42 @@ test('domain mapping helper regression', () => {
   const index = buildRolePreferenceIndex(rolePrefs as any);
   expect(index.orchestrator.default_model_name).toBe('m1');
   expect(index.reviewer.preferred_model_names[0]).toBe('m2');
+});
+
+test('첫 role model 추가 flow (빈 preferred에서도 추가 가능)', async () => {
+  (global as any).fetch = vi.fn((url: string, init?: RequestInit) => {
+    if (url.includes('/models/role-preferences') && init?.method === 'PUT') {
+      lastPutBody = init.body ? JSON.parse(init.body as string) : null;
+      return Promise.resolve(ok({ role: 'planner', preferred_model_names: ['m1'], default_model_name: 'm1', fallback_model_names: [] }));
+    }
+    if (url.includes('/models/role-preferences'))
+      return Promise.resolve(ok(rolePrefs.map((item) => (item.role === 'planner' ? { ...item, preferred_model_names: [], default_model_name: null } : item))));
+    if (url.includes('/models/role-candidates/'))
+      return Promise.resolve(ok([
+        { model_name: 'm1', downloaded: true, enabled: true, priority: 0, capability_score: 8, is_preferred: false, is_default: false, is_fallback: false, supports_vision: false, supports_reasoning: true, supports_embeddings: true },
+      ]));
+    if (url.includes('/system/runtime-info')) return Promise.resolve(ok({ env: 'dev', mode: 'web', data_root: 'd', upload_root: 'u', database_url: 'db', qdrant_url: 'q', ollama_base_url: 'o', gpu_enabled: true }));
+    if (url.includes('/models')) return Promise.resolve(ok(models));
+    return Promise.resolve(ok({}));
+  });
+
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <ModelPanel />
+    </QueryClientProvider>
+  );
+  const checkbox = await screen.findByLabelText('role-planner-m1');
+  fireEvent.click(checkbox);
+  await waitFor(() => expect(lastPutBody?.preferred_model_names).toEqual(['m1']));
+});
+
+test('default/fallback reorder flow', async () => {
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <ModelPanel />
+    </QueryClientProvider>
+  );
+  const setDefaultButton = await screen.findByText('set default');
+  fireEvent.click(setDefaultButton);
+  await waitFor(() => expect(lastPutBody?.preferred_model_names?.[0]).toBeTruthy());
 });

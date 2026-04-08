@@ -104,3 +104,29 @@ def test_model_registry_metadata_schema_regression(monkeypatch):
     assert reviewer_models
     assert all(isinstance(m.get('metadata_json') or {}, dict) for m in reviewer_models)
     assert all('role_priority' in (m.get('metadata_json') or {}) for m in reviewer_models)
+
+
+def test_role_candidates_return_even_when_no_preference(monkeypatch):
+    monkeypatch.setattr(OllamaClient, 'list_models', _mock_list_models)
+    sync = client.post('/models/sync')
+    assert sync.status_code == 200
+
+    reset_pref = client.put('/models/role-preferences/orchestrator', json={'preferred_model_names': []})
+    assert reset_pref.status_code == 200
+    candidates = client.get('/models/role-candidates/orchestrator?enabled_only=false')
+    assert candidates.status_code == 200
+    payload = candidates.json()
+    assert len(payload) >= 2
+    assert {'downloaded', 'enabled', 'capability_score', 'is_preferred', 'is_default', 'is_fallback'}.issubset(payload[0].keys())
+
+
+def test_role_candidates_ordering_prefers_default_and_capability(monkeypatch):
+    monkeypatch.setattr(OllamaClient, 'list_models', _mock_list_models)
+    sync = client.post('/models/sync')
+    assert sync.status_code == 200
+    names = [m['model_name'] for m in sync.json()]
+    set_pref = client.put('/models/role-preferences/orchestrator', json={'preferred_model_names': names[::-1]})
+    assert set_pref.status_code == 200
+    payload = client.get('/models/role-candidates/orchestrator?enabled_only=false').json()
+    assert payload[0]['is_default'] is True
+    assert payload[0]['model_name'] == names[::-1][0]

@@ -100,6 +100,13 @@ export interface RoleCandidate {
   downloaded: boolean;
   enabled: boolean;
   priority: number;
+  capability_score: number;
+  is_preferred: boolean;
+  is_default: boolean;
+  is_fallback: boolean;
+  supports_vision: boolean;
+  supports_reasoning: boolean;
+  supports_embeddings: boolean;
 }
 
 export interface OrchestrationRun {

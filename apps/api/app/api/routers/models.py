@@ -66,6 +66,21 @@ def _role_preferred_models(db: Session, role: str, *, enabled_only: bool = False
     return preferred
 
 
+def _role_capability_score(model: ModelRegistry, role: str) -> int:
+    score = 0
+    if role in {"orchestrator", "model_router", "reviewer", "critic", "final_responder", "planner"} and model.supports_reasoning:
+        score += 3
+    if role in {"specialist", "final_responder"} and model.supports_vision:
+        score += 2
+    if role == "context_resolver" and model.supports_embeddings:
+        score += 3
+    if model.enabled:
+        score += 1
+    if model.downloaded:
+        score += 1
+    return score
+
+
 @router.get("", response_model=list[ModelRegistryOut])
 def list_registry(db: Session = Depends(get_db)):
     return db.scalars(select(ModelRegistry).order_by(ModelRegistry.sort_order.asc(), ModelRegistry.model_name.asc())).all()
@@ -237,13 +252,36 @@ def update_role_preferences(role: str, payload: RolePreferenceUpdate, db: Sessio
 @router.get("/role-candidates/{role}", response_model=list[RoleCandidateOut])
 def list_role_candidates(role: str, enabled_only: bool = True, db: Session = Depends(get_db)):
     normalized_role = _validate_role(role)
-    rows = _role_preferred_models(db, normalized_role, enabled_only=enabled_only)
+    q = select(ModelRegistry)
+    if enabled_only:
+        q = q.where(ModelRegistry.enabled.is_(True))
+    rows = db.scalars(q).all()
+    preferred_names = [m.model_name for m in _role_preferred_models(db, normalized_role, enabled_only=False)]
+    default_name = preferred_names[0] if preferred_names else None
+    fallback_names = set(preferred_names[1:])
+
+    rows.sort(
+        key=lambda row: (
+            -(1 if row.model_name in preferred_names else 0),
+            -_role_capability_score(row, normalized_role),
+            _role_priority(row, normalized_role),
+            row.sort_order,
+            row.model_name,
+        )
+    )
     return [
         RoleCandidateOut(
             model_name=row.model_name,
             downloaded=row.downloaded,
             enabled=row.enabled,
             priority=_role_priority(row, normalized_role),
+            capability_score=_role_capability_score(row, normalized_role),
+            is_preferred=row.model_name in preferred_names,
+            is_default=row.model_name == default_name,
+            is_fallback=row.model_name in fallback_names,
+            supports_vision=row.supports_vision,
+            supports_reasoning=row.supports_reasoning,
+            supports_embeddings=row.supports_embeddings,
         )
         for row in rows
     ]
