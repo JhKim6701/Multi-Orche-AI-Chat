@@ -65,9 +65,41 @@ export interface Asset {
 export interface Model {
   id: number;
   model_name: string;
+  provider?: string;
   downloaded: boolean;
   enabled: boolean;
+  supports_vision?: boolean;
+  supports_tools?: boolean;
+  supports_embeddings?: boolean;
+  supports_reasoning?: boolean;
+  preferred_roles_json?: string[] | null;
+  metadata_json?: Record<string, unknown> | null;
   sort_order: number;
+  last_seen_at?: string | null;
+}
+
+export type OrchestrationRole =
+  | 'planner'
+  | 'context_resolver'
+  | 'specialist'
+  | 'model_router'
+  | 'final_responder'
+  | 'reviewer'
+  | 'critic'
+  | 'orchestrator';
+
+export interface RolePreference {
+  role: OrchestrationRole;
+  preferred_model_names: string[];
+  default_model_name?: string | null;
+  fallback_model_names: string[];
+}
+
+export interface RoleCandidate {
+  model_name: string;
+  downloaded: boolean;
+  enabled: boolean;
+  priority: number;
 }
 
 export interface OrchestrationRun {

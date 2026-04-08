@@ -3,7 +3,7 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 
 import { api } from '../lib/api';
 import { useUiStore } from '../store/uiStore';
-import { Asset, MessageListResponse, OrchestrationRun, OrchestrationStep } from '../types/domain';
+import { Asset, MessageListResponse, OrchestrationRun, OrchestrationStep, RolePreference } from '../types/domain';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
 
@@ -172,6 +172,16 @@ export function ChatPanel() {
     enabled: !!selectedRunId && orchestratorOn,
     refetchInterval: orchestratorOn ? 3000 : false,
   });
+  const { data: rolePreferencesRaw = [] } = useQuery({
+    queryKey: ['role-preferences'],
+    queryFn: () => api.get<RolePreference[]>('/models/role-preferences'),
+    enabled: orchestratorOn,
+  });
+  const rolePreferences = Array.isArray(rolePreferencesRaw) ? rolePreferencesRaw : [];
+  const rolePreferenceByRole = useMemo(
+    () => rolePreferences.reduce<Record<string, RolePreference>>((acc, item) => ({ ...acc, [item.role]: item }), {}),
+    [rolePreferences]
+  );
 
   useEffect(() => {
     if (!selectedRunId || !orchestratorOn) return;
@@ -550,6 +560,12 @@ export function ChatPanel() {
               <div style={{ fontSize: 12 }}>retrieval mode: {runDetail?.run?.retrieval_mode ?? '-'} · ocr used: {String(runDetail?.run?.ocr_used ?? false)}</div>
               <div style={{ fontSize: 12 }}>Critic model: {runDetail?.run?.critic_model ?? '-'} · critic summary: {runDetail?.run?.critic_summary ?? '-'}</div>
               <div style={{ fontSize: 12 }}>Specialist model: {runDetail?.run?.specialist_model ?? '-'} · specialist summary: {runDetail?.run?.specialist_summary ?? '-'}</div>
+              <div style={{ fontSize: 12 }}>
+                Role mapping check · reviewer(default={rolePreferenceByRole.reviewer?.default_model_name ?? '-'}) / critic(default={rolePreferenceByRole.critic?.default_model_name ?? '-'}) / specialist(default={rolePreferenceByRole.specialist?.default_model_name ?? '-'}) / orchestrator(default={rolePreferenceByRole.orchestrator?.default_model_name ?? '-'})
+              </div>
+              <div style={{ fontSize: 12 }}>
+                Actual run · routing={runDetail?.run?.routing_reason ?? '-'} · reviewer_decision={runDetail?.run?.reviewer_decision ?? '-'} · critic_model={runDetail?.run?.critic_model ?? '-'} · specialist_model={runDetail?.run?.specialist_model ?? '-'}
+              </div>
               <div style={{ fontSize: 12 }}>Approval: {runDetail?.run?.approval_status ?? '-'} · publish: {runDetail?.run?.final_publish_status ?? '-'}</div>
               {runDetail?.run?.pending_final_draft && (
                 <div style={{ fontSize: 12, border: '1px dashed #ccc', padding: 6, marginTop: 4 }}>
