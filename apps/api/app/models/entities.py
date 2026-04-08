@@ -119,6 +119,7 @@ class ModelRegistry(Base):
     supports_embeddings: Mapped[bool] = mapped_column(Boolean, default=False)
     supports_reasoning: Mapped[bool] = mapped_column(Boolean, default=False)
     preferred_roles_json: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 

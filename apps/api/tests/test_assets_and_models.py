@@ -64,3 +64,43 @@ def test_model_toggle_and_sort(monkeypatch):
     sorted_res = client.patch(f"/models/{model['id']}/sort", json={'sort_order': 99})
     assert sorted_res.status_code == 200
     assert sorted_res.json()['sort_order'] == 99
+
+
+def test_role_preference_api_contract(monkeypatch):
+    monkeypatch.setattr(OllamaClient, 'list_models', _mock_list_models)
+    sync = client.post('/models/sync')
+    assert sync.status_code == 200
+    names = [m['model_name'] for m in sync.json()]
+
+    update = client.put('/models/role-preferences/orchestrator', json={'preferred_model_names': names})
+    assert update.status_code == 200
+    payload = update.json()
+    assert payload['role'] == 'orchestrator'
+    assert payload['preferred_model_names'] == names
+    assert payload['default_model_name'] == names[0]
+    assert payload['fallback_model_names'] == names[1:]
+
+    listed = client.get('/models/role-preferences')
+    assert listed.status_code == 200
+    orchestrator = next(item for item in listed.json() if item['role'] == 'orchestrator')
+    assert orchestrator['preferred_model_names'] == names
+
+    candidates = client.get('/models/role-candidates/orchestrator')
+    assert candidates.status_code == 200
+    assert [c['model_name'] for c in candidates.json()] == names
+
+
+def test_model_registry_metadata_schema_regression(monkeypatch):
+    monkeypatch.setattr(OllamaClient, 'list_models', _mock_list_models)
+    sync = client.post('/models/sync')
+    assert sync.status_code == 200
+    names = [m['model_name'] for m in sync.json()]
+    update = client.put('/models/role-preferences/reviewer', json={'preferred_model_names': names[::-1]})
+    assert update.status_code == 200
+
+    registry = client.get('/models')
+    assert registry.status_code == 200
+    reviewer_models = [m for m in registry.json() if 'reviewer' in (m.get('preferred_roles_json') or [])]
+    assert reviewer_models
+    assert all(isinstance(m.get('metadata_json') or {}, dict) for m in reviewer_models)
+    assert all('role_priority' in (m.get('metadata_json') or {}) for m in reviewer_models)

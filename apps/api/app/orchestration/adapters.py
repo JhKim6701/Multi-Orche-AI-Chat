@@ -180,6 +180,13 @@ class OrchestrationRuntime:
             chosen = next((m for m in rows if m.model_name == orchestrator_model_name), None)
             if chosen:
                 return chosen.model_name, "user_selected_orchestrator_model"
+        preferred_for_orchestrator = self._preferred_role_candidates(rows, role="orchestrator")
+        for candidate in preferred_for_orchestrator:
+            if requires_vision and not candidate.supports_vision:
+                continue
+            if needs_reasoning and not candidate.supports_reasoning and not candidate.supports_vision:
+                continue
+            return candidate.model_name, "preferred_role_orchestrator"
         if not gpu_enabled:
             cpu_safe = [m for m in rows if not m.supports_vision and not m.supports_reasoning]
             if cpu_safe:
@@ -193,6 +200,22 @@ class OrchestrationRuntime:
             if reasoning:
                 return reasoning.model_name, "long_context_reasoning"
         return rows[0].model_name, "sort_order_fallback"
+
+    @staticmethod
+    def _preferred_role_candidates(rows: list[ModelRegistry], role: str) -> list[ModelRegistry]:
+        candidates = []
+        for model in rows:
+            roles = model.preferred_roles_json if isinstance(model.preferred_roles_json, list) else []
+            if role not in roles:
+                continue
+            metadata = model.metadata_json if isinstance(model.metadata_json, dict) else {}
+            priority_map = metadata.get("role_priority", {})
+            priority = priority_map.get(role) if isinstance(priority_map, dict) else None
+            if not isinstance(priority, int):
+                priority = 10_000 + model.sort_order
+            candidates.append((priority, model.sort_order, model.model_name, model))
+        candidates.sort(key=lambda x: (x[0], x[1], x[2]))
+        return [row[3] for row in candidates]
 
     def open_step(self, step_name: str, assigned_role: str, model_name: str | None, input_summary: str, depends_on: list[int] | None = None) -> StepContext:
         step = OrchestrationStep(

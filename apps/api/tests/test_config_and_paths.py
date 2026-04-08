@@ -71,3 +71,10 @@ def test_artifact_manager_writes_under_upload_root(tmp_path: Path, monkeypatch):
     )
     assert str(asset.stored_path).startswith(str(tmp_path / "uploads"))
     assert Path(asset.stored_path).exists()
+
+
+def test_readme_runtime_and_langgraph_consistency():
+    readme = Path(__file__).resolve().parents[3] / "README.md"
+    text = readme.read_text(encoding="utf-8")
+    assert "LangGraph" in text
+    assert "PostgreSQL + Qdrant + Host Ollama" in text

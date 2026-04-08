@@ -15,7 +15,7 @@ Ollama 기반 로컬 멀티모델 채팅/오케스트레이션 데스크톱 워�
 - 자산 ingest(텍스트 추출/청크) + retrieval snippet 기반 프롬프트 컨텍스트 반영
 - 모델 Sync/Pull/Toggle/Sort (우측 패널과 API 연결)
 - 상단 하드웨어 메트릭 polling
-- 오케스트레이터 ON 시 rule-based orchestration 실행 (planner/context_resolver/model_router/final_responder)
+- 오케스트레이터 ON 시 LangGraph 기반 orchestration 그래프 실행 (planner/context_resolver/model_router/final_responder/reviewer/critic/revision/publish)
 - topic-aware segmentation: 주제 전환 시 새 segment 자동 분리 + 관련 segment 중심 문맥 스코핑
 - 이미지 업로드 시 vision-capable 모델 대상으로 실제 image payload 전달(multimodal)
 - assistant 응답의 AI generated artifact(.md/.txt/.json/.py/.ts) 자동 생성 및 다운로드
