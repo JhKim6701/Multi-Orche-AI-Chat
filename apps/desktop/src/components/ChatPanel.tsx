@@ -8,6 +8,7 @@ import { Alert } from './ui/alert';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
+import { Separator } from './ui/separator';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
 
@@ -383,136 +384,159 @@ export function ChatPanel() {
     return '현재 주제 유지';
   }, [divergence]);
 
+  const statusBadgeVariant = (status?: string) => {
+    if (!status) return 'default' as const;
+    if (status.includes('fail')) return 'danger' as const;
+    if (status.includes('pending') || status.includes('running')) return 'warning' as const;
+    if (status.includes('complete') || status.includes('approved') || status.includes('published')) return 'success' as const;
+    return 'info' as const;
+  };
+
+  const eventBadgeVariant = (eventType: string) => {
+    if (eventType.includes('failed')) return 'danger' as const;
+    if (eventType.includes('approval')) return 'warning' as const;
+    if (eventType.includes('specialist')) return 'info' as const;
+    return 'default' as const;
+  };
+
   return (
-    <main style={{ padding: 10, height: '100%', display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <h3 style={{ margin: 0 }}>Chat {orchestratorOn ? '(Orchestrator ON)' : '(Manual Mode)'}</h3>
-
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-        <button style={{ fontSize: 12, background: viewMode === 'active' ? '#d8f0ff' : '#fff' }} onClick={() => setViewMode('active')}>Active Segment View</button>
-        <button style={{ fontSize: 12, background: viewMode === 'all' ? '#d8f0ff' : '#fff' }} onClick={() => setViewMode('all')}>Full Timeline View</button>
-        <button style={{ fontSize: 12, background: viewMode === 'segment' ? '#d8f0ff' : '#fff' }} onClick={() => setViewMode('segment')} disabled={!selectedSegmentId}>Selected Segment View</button>
+    <main className="flex h-full flex-col gap-3 p-3">
+      <div className="flex items-center justify-between">
+        <h3 className="m-0 text-sm font-semibold">Chat {orchestratorOn ? '(Orchestrator ON)' : '(Manual Mode)'}</h3>
+        <Badge variant={orchestratorOn ? 'info' : 'default'}>{orchestratorOn ? 'orchestrated' : 'manual'}</Badge>
       </div>
 
-      <div style={{ fontSize: 12, background: '#fafafa', padding: 6, border: '1px solid #eee' }}>
-        Active Segment: {activeSegment?.topic_label ?? 'N/A'} (#{scopeMeta?.active_segment_id ?? '-'})
-        {activeSegment?.parent_segment_id ? ` · parent seg#${activeSegment.parent_segment_id}` : ''}
-        {activeSegment?.branch_from_message_id ? ` · origin msg#${activeSegment.branch_from_message_id}` : ''}
-        {viewMode === 'segment' && selectedSegment ? ` · viewing seg#${selectedSegment.id}:${selectedSegment.topic_label}` : ''}
-      </div>
-
-      {!!segments.length && (
-        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-          {segments.map((s) => (
-            <button key={s.id} onClick={() => { setSelectedSegmentId(s.id); setViewMode('segment'); }} style={{ fontSize: 11, background: s.is_active ? '#e8f0ff' : '#fff' }}>
-              seg#{s.id} {s.topic_label} {s.is_active ? '· active' : ''} {s.parent_segment_id ? `· child of #${s.parent_segment_id}` : '· root'} {s.branch_from_message_id ? `· from msg#${s.branch_from_message_id}` : ''}
-            </button>
-          ))}
-          {viewMode === 'segment' && selectedSegmentId && (
-            <button onClick={() => switchSegment.mutate(selectedSegmentId)} style={{ fontSize: 11 }}>Switch active to seg#{selectedSegmentId}</button>
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm">Segment Scope</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant={viewMode === 'active' ? 'default' : 'outline'} onClick={() => setViewMode('active')}>Active Segment View</Button>
+            <Button size="sm" variant={viewMode === 'all' ? 'default' : 'outline'} onClick={() => setViewMode('all')}>Full Timeline View</Button>
+            <Button size="sm" variant={viewMode === 'segment' ? 'default' : 'outline'} onClick={() => setViewMode('segment')} disabled={!selectedSegmentId}>Selected Segment View</Button>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+            <Badge variant="info">active #{scopeMeta?.active_segment_id ?? '-'}</Badge>
+            <span>{activeSegment?.topic_label ?? 'N/A'}</span>
+            {activeSegment?.parent_segment_id ? <span>parent #{activeSegment.parent_segment_id}</span> : null}
+            {activeSegment?.branch_from_message_id ? <span>origin msg#{activeSegment.branch_from_message_id}</span> : null}
+            {viewMode === 'segment' && selectedSegment ? <Badge>viewing seg#{selectedSegment.id}:{selectedSegment.topic_label}</Badge> : null}
+          </div>
+          {!!segments.length && (
+            <div className="flex flex-wrap gap-2">
+              {segments.map((s) => (
+                <Button key={s.id} size="sm" variant={s.is_active ? 'default' : 'outline'} onClick={() => { setSelectedSegmentId(s.id); setViewMode('segment'); }}>
+                  seg#{s.id} {s.topic_label}
+                </Button>
+              ))}
+              {viewMode === 'segment' && selectedSegmentId && (
+                <Button size="sm" variant="ghost" onClick={() => switchSegment.mutate(selectedSegmentId)}>Switch active to seg#{selectedSegmentId}</Button>
+              )}
+            </div>
           )}
-        </div>
-      )}
+        </CardContent>
+      </Card>
 
-      {!selectedChatId && <p style={{ fontSize: 12 }}>Select chat to start.</p>}
-      {messageError && <p style={{ color: 'red' }}>Failed to load messages</p>}
+      {!selectedChatId && <Alert className="text-xs">Select chat to start.</Alert>}
+      {messageError && <Alert className="border-red-200 bg-red-50 text-red-700">Failed to load messages</Alert>}
 
-      <section style={{ flex: 1, overflow: 'auto', border: '1px solid #eee', borderRadius: 6, padding: 8 }}>
-        {timeline.length === 0 ? <p style={{ fontSize: 12 }}>No messages yet</p> : null}
+      <Card className="min-h-[260px] flex-1 overflow-hidden">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm">Timeline</CardTitle>
+        </CardHeader>
+        <CardContent className="max-h-[52vh] space-y-2 overflow-auto">
+        {timeline.length === 0 ? <p className="text-xs text-slate-500">No messages yet</p> : null}
         {timeline.map((m, idx) => (
-          <div key={m.id} style={{ marginBottom: 8, padding: 8, background: m.role === 'user' ? '#f7fbff' : '#f8f8f8', borderRadius: 6 }}>
+          <div key={m.id} className={`rounded-md border p-3 ${m.role === 'user' ? 'border-blue-100 bg-blue-50/40' : 'border-slate-200 bg-slate-50/50'}`}>
             {scopeMeta?.scope === 'all' && scopeMeta.segment_boundaries.includes(m.sequence_no) && (
-              <div style={{ fontSize: 11, color: '#8a5' }}>Segment boundary · segment #{m.segment_id}</div>
+              <Badge variant="warning" className="mb-1">Segment boundary · segment #{m.segment_id}</Badge>
             )}
             {idx > 0 && timeline[idx - 1].segment_id !== m.segment_id && scopeMeta?.scope !== 'all' && (
-              <div style={{ fontSize: 11, color: '#8a5' }}>새 주제 시작 (segment #{m.segment_id})</div>
+              <Badge variant="warning" className="mb-1">새 주제 시작 (segment #{m.segment_id})</Badge>
             )}
-            <div style={{ fontSize: 11, color: '#666' }}>{m.role} · seg#{m.segment_id ?? '-'} {m.model_name ? `· ${m.model_name}` : ''}</div>
-            <div style={{ whiteSpace: 'pre-wrap', fontSize: 13 }}>{m.content_markdown}</div>
+            <div className="mb-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-600">
+              <Badge>{m.role}</Badge>
+              <span>seg#{m.segment_id ?? '-'}</span>
+              {m.model_name ? <Badge variant="info">{m.model_name}</Badge> : null}
+            </div>
+            <div className="whitespace-pre-wrap text-sm">{m.content_markdown}</div>
             {m.role === 'assistant' && (
-              <div style={{ marginTop: 6, fontSize: 11, borderTop: '1px dashed #ddd', paddingTop: 6 }}>
+              <div className="mt-2 border-t border-dashed pt-2 text-[11px] text-slate-600">
                 {m.content_markdown.split('\n').filter((line) => line.startsWith('[Used ') || line.startsWith('[RAG Provenance]')).map((line, i) => (
                   <div key={i}>{line}</div>
                 ))}
               </div>
             )}
             {m.role === 'assistant' && (generatedByMessage.get(m.id)?.length ?? 0) > 0 && (
-              <div style={{ marginTop: 6, borderTop: '1px dashed #ddd', paddingTop: 6, fontSize: 11 }}>
-                <div>Generated Artifacts</div>
+              <div className="mt-2 space-y-1 border-t border-dashed pt-2 text-[11px]">
+                <div className="font-medium">Generated Artifacts</div>
                 {(generatedByMessage.get(m.id) ?? []).map((asset) => (
-                  <div key={asset.id} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <div key={asset.id} className="flex flex-wrap items-center gap-2">
                     <a href={`${API_BASE}/assets/${asset.id}/download`} target="_blank">{asset.original_filename}</a>
-                    <span>model={asset.producing_model ?? '-'}</span>
-                    <span>role={asset.producing_role ?? '-'}</span>
+                    <Badge>model={asset.producing_model ?? '-'}</Badge>
+                    <Badge>role={asset.producing_role ?? '-'}</Badge>
                     <span>kind={asset.derived_metadata_json?.kind ?? 'unknown'}</span>
-                    <span>summary={asset.derived_metadata_json?.artifact_summary ?? '-'}</span>
                   </div>
                 ))}
               </div>
             )}
             {m.role === 'user' && (
-              <div style={{ marginTop: 6 }}>
-                <button
-                  type="button"
-                  onClick={() => branchMutation.mutate({ messageId: m.id, topicLabel: `${m.content_markdown.split(' ').slice(0, 4).join(' ') || 'branch'}-branch` })}
-                  style={{ fontSize: 11 }}
-                >
+              <div className="mt-2">
+                <Button type="button" size="sm" variant="outline" onClick={() => branchMutation.mutate({ messageId: m.id, topicLabel: `${m.content_markdown.split(' ').slice(0, 4).join(' ') || 'branch'}-branch` })}>
                   여기서 분기 만들기
-                </button>
+                </Button>
               </div>
             )}
           </div>
         ))}
-      </section>
+        </CardContent>
+      </Card>
 
-      <section style={{ border: '1px solid #eee', borderRadius: 6, padding: 8 }}>
-        <div style={{ fontSize: 12, marginBottom: 6 }}>Assets</div>
-        {assets.length === 0 ? <small>No uploads</small> : assets.map((a) => (
-          <div key={a.id} style={{ fontSize: 12, marginBottom: 4 }}>
+      <div className="grid gap-3 md:grid-cols-2">
+      <Card>
+        <CardHeader className="pb-2"><CardTitle className="text-sm">Assets</CardTitle></CardHeader>
+        <CardContent className="space-y-2">
+        {assets.length === 0 ? <small className="text-xs text-slate-500">No uploads</small> : assets.map((a) => (
+          <div key={a.id} className="rounded border p-2 text-xs">
             <a href={`${API_BASE}/assets/${a.id}/download`} target="_blank">{a.original_filename}</a>
-            <small style={{ marginLeft: 6 }}>[{a.derived_metadata_json?.ingest_status ?? 'uploaded'}] chunks:{a.derived_metadata_json?.chunk_count ?? 0}</small>
-            <div style={{ fontSize: 11, color: '#555' }}>
-              uploaded={String(a.derived_metadata_json?.ingest_pipeline?.uploaded ?? true)} ·
-              extracted={String(a.derived_metadata_json?.ingest_pipeline?.extracted ?? false)} ·
-              chunked={String(a.derived_metadata_json?.ingest_pipeline?.chunked ?? false)} ·
-              embedded={String(a.derived_metadata_json?.ingest_pipeline?.embedded ?? false)} ·
-              indexed={String(a.derived_metadata_json?.ingest_pipeline?.indexed ?? false)} ·
-              ocr_fallback_used={String(a.derived_metadata_json?.ocr_fallback_used ?? false)} ·
-              failed={String(a.derived_metadata_json?.ingest_pipeline?.failed ?? false)}
+            <Badge className="ml-2">chunks:{a.derived_metadata_json?.chunk_count ?? 0}</Badge>
+            <div className="mt-1 text-[11px] text-slate-600">
+              ingest={a.derived_metadata_json?.ingest_status ?? 'uploaded'} · ocr={String(a.derived_metadata_json?.ocr_fallback_used ?? false)} · failed={String(a.derived_metadata_json?.ingest_pipeline?.failed ?? false)}
             </div>
           </div>
         ))}
-      </section>
-      <section style={{ border: '1px solid #eee', borderRadius: 6, padding: 8 }}>
-        <button type="button" style={{ fontSize: 12 }} onClick={() => setShowDiagnostics((v) => !v)}>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-2"><CardTitle className="text-sm">Diagnostics & Retrieval</CardTitle></CardHeader>
+        <CardContent className="space-y-2">
+        <Button type="button" size="sm" variant="outline" onClick={() => setShowDiagnostics((v) => !v)}>
           {showDiagnostics ? 'Hide' : 'Show'} Diagnostics
-        </button>
+        </Button>
         {showDiagnostics && (
-          <div style={{ marginTop: 6, fontSize: 11 }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4 }}>
+          <div className="rounded border p-2 text-[11px]">
+            <label className="mb-1 flex items-center gap-2">
               <input type="checkbox" checked={showDiagnosticsVerbose} onChange={(e) => setShowDiagnosticsVerbose(e.target.checked)} />
               dev verbose diagnostics
             </label>
             <div>status={diagnostics?.status ?? '-'} · mode={diagnostics?.mode ?? '-'}</div>
-            <div>data_root={diagnostics?.data_root ?? '-'} · upload_root={diagnostics?.upload_root ?? '-'}</div>
-            <div>database={diagnostics?.database_url ?? '-'} · ollama={diagnostics?.ollama_base_url ?? '-'} · qdrant={diagnostics?.qdrant_url ?? '-'}</div>
-            <div>sensitive_details_included={String(diagnostics?.sensitive_details_included ?? false)}</div>
             <div>unresolved={(diagnostics?.unresolved_dependencies ?? []).join(', ') || 'none'}</div>
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <div className="mt-1 flex flex-wrap gap-1">
               {Object.entries(diagnostics?.checks ?? {}).map(([k, v]) => (
-                <span key={k} style={{ background: v.ok ? '#ecfdf3' : '#fef3f2', padding: '2px 4px', borderRadius: 4 }}>{k}:{v.ok ? 'ok' : 'down'}</span>
+                <Badge key={k} variant={v.ok ? 'success' : 'danger'}>{k}:{v.ok ? 'ok' : 'down'}</Badge>
               ))}
             </div>
           </div>
         )}
-      </section>
-      <section style={{ border: '1px solid #eee', borderRadius: 6, padding: 8 }}>
-        <button type="button" style={{ fontSize: 12 }} onClick={() => setShowRetrievalDebug((v) => !v)}>
+        <Button type="button" size="sm" variant="outline" onClick={() => setShowRetrievalDebug((v) => !v)}>
           {showRetrievalDebug ? 'Hide' : 'Show'} Retrieval Preview
-        </button>
+        </Button>
         {showRetrievalDebug && (
-          <div style={{ marginTop: 6, fontSize: 11 }}>
+          <div className="space-y-1 rounded border p-2 text-[11px]">
             {(retrievalPreview?.hits ?? []).map((hit) => (
-              <div key={hit.chunk_id} style={{ marginBottom: 4, borderBottom: '1px dashed #eee' }}>
+              <div key={hit.chunk_id} className="border-b border-dashed pb-1">
                 asset#{hit.asset_id} {hit.filename} · chunk#{hit.chunk_id} idx={hit.chunk_index} page={hit.page ?? '-'} · score={hit.score}
                 <div>vector={hit.vector_score} · lexical={hit.lexical_score} · mode={hit.retrieval_mode} · ocr={String(hit.ocr_fallback_used ?? false)}</div>
                 <div>{hit.snippet}</div>
@@ -521,32 +545,31 @@ export function ChatPanel() {
             {!!retrievalPreview?.packed_context && (
               <details>
                 <summary>packed context preview</summary>
-                <pre style={{ whiteSpace: 'pre-wrap' }}>{retrievalPreview.packed_context}</pre>
+                <pre className="whitespace-pre-wrap">{retrievalPreview.packed_context}</pre>
               </details>
             )}
             {(retrievalPreview?.hits ?? []).length === 0 && <small>No retrieval hits for current query.</small>}
           </div>
         )}
-      </section>
+        </CardContent>
+      </Card>
+      </div>
 
-      {usedAssetsLine && <div style={{ fontSize: 12, border: '1px solid #eee', padding: 6 }}>Used assets: {usedAssetsLine}</div>}
+      {usedAssetsLine && <Alert className="text-xs">Used assets: {usedAssetsLine}</Alert>}
       {!!divergence && (
-        <div style={{ fontSize: 12, color: '#555', border: '1px solid #eee', padding: 6 }}>
+        <Alert className="text-xs text-slate-700">
           {divergenceLabel} · overlap={divergence.overlap.toFixed(2)} · suggested label: {divergence.suggested_topic_label}
           {divergence.recommended_action === 'new_segment' && (
-            <button
-              style={{ fontSize: 11, marginLeft: 6 }}
-              onClick={() => {
+            <Button size="sm" variant="outline" className="ml-2" onClick={() => {
                 if (!selectedChatId || !timeline.length) return;
                 const lastUser = [...timeline].reverse().find((item) => item.role === 'user');
                 if (!lastUser) return;
                 branchMutation.mutate({ messageId: lastUser.id, topicLabel: divergence.suggested_topic_label });
-              }}
-            >
+              }}>
               새 segment로 분기
-            </button>
+            </Button>
           )}
-        </div>
+        </Alert>
       )}
 
       {orchestratorOn && (
@@ -564,32 +587,32 @@ export function ChatPanel() {
                 <Badge>publish={runDetail?.run?.final_publish_status ?? '-'}</Badge>
                 <Badge>active={runDetail?.run?.current_active_step ?? '-'}</Badge>
               </div>
-              <div style={{ fontSize: 12 }}>Run Segment: {runDetail?.run?.segment_id ?? '-'} · topic: {runDetail?.run?.topic_label ?? '-'} · parent: {runDetail?.run?.parent_segment_id ?? '-'}</div>
-              <div style={{ fontSize: 12 }}>Divergence reason: {runDetail?.run?.divergence_reason ?? '-'} · current step: {runDetail?.run?.current_active_step ?? '-'}</div>
-              <div style={{ fontSize: 12 }}>
+              <div className="text-xs">Run Segment: {runDetail?.run?.segment_id ?? '-'} · topic: {runDetail?.run?.topic_label ?? '-'} · parent: {runDetail?.run?.parent_segment_id ?? '-'}</div>
+              <div className="text-xs">Divergence reason: {runDetail?.run?.divergence_reason ?? '-'} · current step: {runDetail?.run?.current_active_step ?? '-'}</div>
+              <div className="text-xs">
                 Routing reason: {runDetail?.run?.routing_reason ?? '-'} · reviewer: {runDetail?.run?.reviewer_decision ?? '-'} · parent summary used: {String(runDetail?.run?.parent_segment_summary_used ?? false)}
               </div>
-              <div style={{ fontSize: 12 }}>Used assets: {(runDetail?.run?.used_asset_ids ?? []).join(', ') || '-'} · used chunks: {(runDetail?.run?.used_chunk_ids ?? []).join(', ') || '-'} · image assets: {(runDetail?.run?.image_asset_ids ?? []).join(', ') || '-'} · vision used: {String(runDetail?.run?.vision_used ?? false)} · gpu enabled: {String(runDetail?.run?.gpu_enabled ?? true)}</div>
-              <div style={{ fontSize: 12 }}>retrieval mode: {runDetail?.run?.retrieval_mode ?? '-'} · ocr used: {String(runDetail?.run?.ocr_used ?? false)}</div>
-              <div style={{ fontSize: 12 }}>Critic model: {runDetail?.run?.critic_model ?? '-'} · critic summary: {runDetail?.run?.critic_summary ?? '-'}</div>
-              <div style={{ fontSize: 12 }}>Specialist model: {runDetail?.run?.specialist_model ?? '-'} · specialist summary: {runDetail?.run?.specialist_summary ?? '-'}</div>
-              <div style={{ fontSize: 12 }}>
+              <div className="text-xs">Used assets: {(runDetail?.run?.used_asset_ids ?? []).join(', ') || '-'} · used chunks: {(runDetail?.run?.used_chunk_ids ?? []).join(', ') || '-'} · image assets: {(runDetail?.run?.image_asset_ids ?? []).join(', ') || '-'}</div>
+              <div className="text-xs">retrieval mode: {runDetail?.run?.retrieval_mode ?? '-'} · ocr used: {String(runDetail?.run?.ocr_used ?? false)}</div>
+              <div className="text-xs">Critic model: {runDetail?.run?.critic_model ?? '-'} · critic summary: {runDetail?.run?.critic_summary ?? '-'}</div>
+              <div className="text-xs">Specialist model: {runDetail?.run?.specialist_model ?? '-'} · specialist summary: {runDetail?.run?.specialist_summary ?? '-'}</div>
+              <div className="text-xs">
                 Role mapping check · reviewer(default={rolePreferenceByRole.reviewer?.default_model_name ?? '-'}) / critic(default={rolePreferenceByRole.critic?.default_model_name ?? '-'}) / specialist(default={rolePreferenceByRole.specialist?.default_model_name ?? '-'}) / orchestrator(default={rolePreferenceByRole.orchestrator?.default_model_name ?? '-'})
               </div>
-              <div style={{ fontSize: 12 }}>
+              <div className="text-xs">
                 Actual run · routing={runDetail?.run?.routing_reason ?? '-'} · reviewer_decision={runDetail?.run?.reviewer_decision ?? '-'} · critic_model={runDetail?.run?.critic_model ?? '-'} · specialist_model={runDetail?.run?.specialist_model ?? '-'}
               </div>
-              <div style={{ fontSize: 12 }}>
+              <div className="text-xs">
                 Final responder model={runDetail?.final_message?.model_name ?? '-'} (default={rolePreferenceByRole.final_responder?.default_model_name ?? '-'})
               </div>
-              <div style={{ fontSize: 12 }}>Approval: {runDetail?.run?.approval_status ?? '-'} · publish: {runDetail?.run?.final_publish_status ?? '-'}</div>
+              <div className="text-xs">Approval: {runDetail?.run?.approval_status ?? '-'} · publish: {runDetail?.run?.final_publish_status ?? '-'}</div>
               {runDetail?.run?.pending_final_draft && (
-                <div style={{ fontSize: 12, border: '1px dashed #ccc', padding: 6, marginTop: 4 }}>
+                <div className="mt-1 rounded border border-dashed p-2 text-xs">
                   Pending draft: {runDetail.run.pending_final_draft.slice(0, 300)}
                 </div>
               )}
               {runDetail?.run?.approval_status === 'pending' && selectedRunId && (
-                <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+                <div className="mt-1 flex gap-2">
                   <Button size="sm" onClick={() => approveRunMutation.mutate(selectedRunId)}>Approve publish</Button>
                   <Button size="sm" variant="destructive" onClick={() => rejectRunMutation.mutate(selectedRunId)}>Reject run</Button>
                 </div>
@@ -607,9 +630,9 @@ export function ChatPanel() {
               {runs.map((r) => <Button key={r.id} size="sm" variant="outline" onClick={() => { setSelectedRunId(r.id); setShowOrchestrationDrawer(true); }} className="mr-1">#{r.id} {r.status}</Button>)}
               <Button type="button" size="sm" variant="outline" onClick={() => setShowOrchestrationDrawer(true)}>Open Visual Panel</Button>
               {runDetail?.steps?.length ? (
-                <ol style={{ marginTop: 6, paddingLeft: 18 }}>
+                <ol className="mt-2 list-decimal space-y-2 pl-4">
                   {runDetail.steps.map((step) => (
-                    <li key={step.id} style={{ fontSize: 12, background: activeStepId === step.id ? '#fff7d6' : 'transparent' }}>
+                    <li key={step.id} className={`rounded border p-2 text-xs ${activeStepId === step.id ? 'border-amber-200 bg-amber-50' : 'bg-slate-50/70'}`}>
                       <div><strong>{step.step_name}</strong> role={step.assigned_role} model={step.model_name ?? '-'}</div>
                       <div>input: {step.input_summary ?? '-'}</div>
                       <div>output: {step.output_summary ?? '-'}</div>
@@ -622,19 +645,11 @@ export function ChatPanel() {
                 </ol>
               ) : null}
               {!!liveEvents.length && (
-                <div style={{ marginTop: 6, fontSize: 11, borderTop: '1px dashed #ddd', paddingTop: 6 }}>
+                <div className="mt-2 space-y-1 border-t border-dashed pt-2 text-[11px]">
                   {liveEvents.map((evt, idx) => {
-                    const bg = evt.event_type.includes('failed')
-                      ? '#ffe4e6'
-                      : evt.event_type.includes('retry') || evt.event_type.includes('fallback')
-                        ? '#fff3e0'
-                        : evt.event_type.includes('approval')
-                          ? '#e8f5e9'
-                          : evt.event_type.includes('specialist')
-                            ? '#eef2ff'
-                            : 'transparent';
                     return (
-                      <div key={`${evt.timestamp}-${idx}`} style={{ background: bg, borderRadius: 4, padding: '2px 4px', marginBottom: 2 }}>
+                      <div key={`${evt.timestamp}-${idx}`} className="rounded border bg-slate-50 p-1">
+                        <Badge variant={eventBadgeVariant(evt.event_type)}>{evt.event_type}</Badge>
                         <strong>{evt.event_type}</strong> · step={evt.step_name ?? '-'} · role={evt.assigned_role ?? '-'} · status={evt.status} · model={evt.model_name ?? '-'}
                         <div>retry={evt.retry_count ?? 0} · fallback={evt.fallback_model_name ?? '-'} ({evt.fallback_reason ?? 'n/a'}) · approval={evt.approval_status ?? '-'}</div>
                       </div>
@@ -648,28 +663,33 @@ export function ChatPanel() {
         </Card>
       )}
 
-      <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <textarea value={message} onChange={(e) => setMessage(e.target.value)} rows={4} placeholder="Type message..." style={{ fontSize: 13 }} />
+      <Card>
+      <CardContent className="pt-4">
+      <form onSubmit={submit} className="flex flex-col gap-2">
+        <textarea value={message} onChange={(e) => setMessage(e.target.value)} rows={4} placeholder="Type message..." className="min-h-24 rounded-md border p-2 text-sm" />
         <input type="file" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-        {visionPending && <small style={{ color: '#0a66c2' }}>Vision badge: 이미지 업로드 감지됨, vision-capable 모델이면 이미지 입력 경로 사용</small>}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6 }}>
+        {visionPending && <Badge variant="info">Vision badge: 이미지 업로드 감지됨</Badge>}
+        <div className="flex flex-wrap items-center justify-between gap-2">
           {orchestratorOn && (
-            <label style={{ fontSize: 11 }}>
+            <label className="text-[11px]">
               <input type="checkbox" checked={requireApprovalBeforePublish} onChange={(e) => setRequireApprovalBeforePublish(e.target.checked)} />
               require approval before publish
             </label>
           )}
-          <small>{sending ? 'Processing request...' : `Ready · scope=${queryScope}${queryScope === 'segment' ? `#${selectedSegmentId}` : ''}`}</small>
-          <div style={{ display: 'flex', gap: 4 }}>
-            <button type="button" onClick={previewStream} style={{ fontSize: 12 }}>Stream Preview</button>
-            <button type="submit" disabled={!canSend || sending} style={{ fontSize: 12 }}>Send</button>
+          <small className="text-xs text-slate-600">{sending ? 'Processing request...' : `Ready · scope=${queryScope}${queryScope === 'segment' ? `#${selectedSegmentId}` : ''}`}</small>
+          <div className="flex gap-2">
+            <Button type="button" size="sm" variant="outline" onClick={previewStream}>Stream Preview</Button>
+            <Button type="submit" size="sm" disabled={!canSend || sending}>Send</Button>
           </div>
         </div>
       </form>
-      {streamPreview && <pre style={{ margin: 0, maxHeight: 120, overflow: 'auto', fontSize: 11, background: '#f5f5f5', padding: 6 }}>{streamPreview}</pre>}
+      </CardContent>
+      </Card>
+      {streamPreview && <pre className="m-0 max-h-32 overflow-auto rounded-md border bg-slate-50 p-2 text-[11px]">{streamPreview}</pre>}
       {orchestratorOn && (
-        <div style={{ fontSize: 11, border: '1px solid #eee', padding: 6 }}>
-          <div>Provenance card</div>
+        <Card>
+          <CardHeader className="pb-2"><CardTitle className="text-sm">Provenance card</CardTitle></CardHeader>
+          <CardContent className="space-y-1 text-[11px]">
           <div>run: {selectedRunId ?? '-'} · segment: {runDetail?.run?.used_segment_id ?? runDetail?.run?.segment_id ?? '-'}</div>
           <div>assets: {(runDetail?.run?.used_asset_ids ?? []).join(', ') || '-'}</div>
           <div>parent summary used: {String(runDetail?.run?.parent_segment_summary_used ?? false)}</div>
@@ -677,44 +697,53 @@ export function ChatPanel() {
           <div>revised final: {latestAssistant?.model_role === 'final_responder_revised' ? 'yes' : 'no'}</div>
           {provenanceLine && <div>{provenanceLine}</div>}
           {runDetail?.final_message?.final_provenance_summary && <div>{runDetail.final_message.final_provenance_summary}</div>}
-        </div>
+          </CardContent>
+        </Card>
       )}
       {surfaceError && (
-        <div style={{ color: '#b42318', border: '1px solid #fecdca', background: '#fef3f2', padding: 8, borderRadius: 6, fontSize: 12 }}>
+        <Alert className="border-red-200 bg-red-50 text-red-700">
           <div><strong>요청 처리 실패</strong></div>
           <div>{surfaceError.message}</div>
-          <div style={{ marginTop: 4 }}>복구 안내: {recoveryHint}</div>
-          <button style={{ marginTop: 6, fontSize: 11 }} onClick={() => {
+          <div className="mt-1">복구 안내: {recoveryHint}</div>
+          <Button size="sm" variant="outline" className="mt-2" onClick={() => {
             qc.invalidateQueries({ queryKey: ['messages', selectedChatId] });
             qc.invalidateQueries({ queryKey: ['orchestration-run-detail', selectedRunId] });
-          }}>Retry load</button>
-        </div>
+          }}>Retry load</Button>
+        </Alert>
       )}
       {showOrchestrationDrawer && (
-        <aside style={{ position: 'fixed', right: 0, top: 0, width: 420, height: '100%', background: '#fff', borderLeft: '1px solid #ddd', padding: 12, overflow: 'auto', boxShadow: '-2px 0 8px rgba(0,0,0,0.08)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <strong>Orchestration Visual Panel</strong>
-            <button onClick={() => setShowOrchestrationDrawer(false)}>Close</button>
+        <aside className="fixed right-0 top-0 z-50 h-full w-[430px] overflow-auto border-l bg-white p-3 shadow-lg">
+          <div className="mb-2 flex items-center justify-between">
+            <strong className="text-sm">Orchestration Visual Panel</strong>
+            <Button size="sm" variant="outline" onClick={() => setShowOrchestrationDrawer(false)}>Close</Button>
           </div>
-          <div style={{ fontSize: 12, marginTop: 8 }}>run #{selectedRunId ?? '-'} · routing={runDetail?.run?.routing_reason ?? '-'} · reviewer={runDetail?.run?.reviewer_decision ?? '-'}</div>
-          <div style={{ fontSize: 12 }}>vision={String(runDetail?.run?.vision_used ?? false)} · images={(runDetail?.run?.image_asset_ids ?? []).join(', ') || '-'}</div>
-          <div style={{ fontSize: 12 }}>generated artifacts={(runDetail?.run?.generated_artifact_ids ?? []).join(', ') || '-'}</div>
-          <div style={{ fontSize: 12 }}>graph summary: steps={runDetail?.run?.execution_graph_summary?.step_count ?? 0}</div>
-          <div style={{ fontSize: 12 }}>parallel groups: {JSON.stringify(runDetail?.run?.execution_graph_summary?.parallel_groups ?? {})}</div>
-          <ol style={{ paddingLeft: 18, marginTop: 10 }}>
+          <div className="mb-2 flex flex-wrap gap-1 text-xs">
+            <Badge>run #{selectedRunId ?? '-'}</Badge>
+            <Badge variant={statusBadgeVariant(runDetail?.run?.status)}>{runDetail?.run?.status ?? '-'}</Badge>
+            <Badge variant={statusBadgeVariant(runDetail?.run?.approval_status)}>{runDetail?.run?.approval_status ?? '-'}</Badge>
+            <Badge>routing={runDetail?.run?.routing_reason ?? '-'}</Badge>
+          </div>
+          <p className="text-xs text-slate-600">graph steps={runDetail?.run?.execution_graph_summary?.step_count ?? 0} · artifacts={(runDetail?.run?.generated_artifact_ids ?? []).join(', ') || '-'}</p>
+          <Separator className="my-2" />
+          <ol className="space-y-2 pl-0">
             {(runDetail?.steps ?? []).map((step, index) => (
-              <li key={step.id} style={{ marginBottom: 8, background: activeStepId === step.id ? '#fff7d6' : '#f9f9f9', padding: 6, borderRadius: 6 }}>
-                <div>#{index + 1} {step.step_name}</div>
+              <li key={step.id} className={`rounded border p-2 text-xs ${activeStepId === step.id ? 'border-amber-200 bg-amber-50' : 'bg-slate-50/70'}`}>
+                <div className="mb-1 flex items-center gap-1">
+                  <Badge>#{index + 1}</Badge>
+                  <span className="font-medium">{step.step_name}</span>
+                  <Badge variant={statusBadgeVariant(step.status)}>{step.status}</Badge>
+                </div>
                 <div>role={step.assigned_role} · model={step.model_name ?? '-'}</div>
                 <div>routing={step.routing_reason ?? '-'} · reviewer={step.reviewer_decision ?? '-'}</div>
-                <div>role-tag={(step.step_metadata?.['step_group'] as string) ?? (step.step_name.includes('critic') ? 'critic' : step.step_name.includes('reviewer') ? 'reviewer' : 'executor')}</div>
-                <div>revision={step.step_name.includes('revision') ? 'yes' : 'no'} · used assets={(step.used_asset_ids ?? []).join(', ') || '-'} · gpu={String(step.gpu_enabled ?? true)}</div>
-                <div>metadata keys={Object.keys(step.step_metadata ?? {}).join(', ') || '-'}</div>
+                <div>retry={step.retry_count ?? 0} · fallback={step.fallback_model_name ?? '-'} ({step.fallback_reason ?? 'n/a'})</div>
+                <div>used assets={(step.used_asset_ids ?? []).join(', ') || '-'} · used chunks={(step.used_chunk_ids ?? []).join(', ') || '-'}</div>
+                <div>approval={step.approval_status ?? '-'} · metadata keys={Object.keys(step.step_metadata ?? {}).join(', ') || '-'}</div>
               </li>
             ))}
           </ol>
+          <Separator className="my-2" />
           {(runDetail?.run?.artifact_summary ?? []).map((a) => (
-            <div key={a.id} style={{ fontSize: 12 }}>
+            <div key={a.id} className="text-xs">
               artifact#{a.id} {a.filename} ({a.producing_model ?? '-'}/{a.producing_role ?? '-'})
             </div>
           ))}
