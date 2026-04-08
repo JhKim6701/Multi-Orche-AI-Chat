@@ -96,7 +96,7 @@ npm run build:desktop
 - 의존성 상태 해석:
   - `system/readiness`: 실행 전(preflight) 준비 여부 (`ready=true/false`)
   - `system/health`: 실행 중(runtime) 지속 상태 (`ok/degraded`)
-- `npm run doctor`는 health/readiness를 함께 점검하고, 미준비 항목과 recovery hint를 출력.
+- `npm run doctor`는 health/readiness를 함께 점검하고, backend/database/ollama/qdrant/upload_root/migration 상태와 recovery hint를 출력.
 
 ## 환경 변수 우선순위
 
@@ -145,6 +145,16 @@ npm run build:desktop
    - tauri dev: `npm run tauri:dev`
    - build: `npm run build:desktop`
 7. 장애 시 복구 순서 적용 (readiness → health → dependency restart)
+
+## Demo 최소 성공 시나리오
+
+1. `npm run doctor`에서 readiness가 `ready`인지 확인
+2. Project 생성
+3. Chat 생성
+4. Manual execution 1회 수행
+5. Orchestration run 생성 (`require_approval_before_publish=true`)
+6. Run detail에서 `approval_pending` 확인
+7. Approve 또는 Reject 수행 후 최종 상태 확인
 
 ## 핵심 API
 

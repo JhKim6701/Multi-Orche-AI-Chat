@@ -64,3 +64,12 @@
 4. `cd apps/api && uvicorn app.main:app --reload --port 8000`
 5. `cd apps/desktop && npm run doctor`
 6. `npm run tauri:dev` 또는 `npm run build:desktop`
+
+## 10) Demo 최소 성공 흐름
+
+1. `npm run doctor` 통과 확인
+2. 프로젝트 생성 → 채팅 생성
+3. 수동 메시지 실행 1회
+4. orchestration run 생성(approval required)
+5. run detail에서 `approval_pending` 확인
+6. approve/reject 실행 후 최종 상태 확인

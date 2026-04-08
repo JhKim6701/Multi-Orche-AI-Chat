@@ -387,6 +387,7 @@ export function ChatPanel() {
   const statusBadgeVariant = (status?: string) => {
     if (!status) return 'default' as const;
     if (status.includes('fail') || status.includes('reject')) return 'danger' as const;
+    if (status.includes('degrad')) return 'warning' as const;
     if (status.includes('pending') || status.includes('running')) return 'warning' as const;
     if (status.includes('complete') || status.includes('approved') || status.includes('published')) return 'success' as const;
     return 'info' as const;
@@ -521,7 +522,10 @@ export function ChatPanel() {
               <input type="checkbox" checked={showDiagnosticsVerbose} onChange={(e) => setShowDiagnosticsVerbose(e.target.checked)} />
               dev verbose diagnostics
             </label>
-            <div>status={diagnostics?.status ?? '-'} · mode={diagnostics?.mode ?? '-'}</div>
+            <div className="mb-1 flex flex-wrap gap-1">
+              <Badge variant={statusBadgeVariant(diagnostics?.status)}>status={diagnostics?.status ?? '-'}</Badge>
+              <Badge variant="info">mode={diagnostics?.mode ?? '-'}</Badge>
+            </div>
             <div>unresolved={(diagnostics?.unresolved_dependencies ?? []).join(', ') || 'none'}</div>
             <div className="mt-1 flex flex-wrap gap-1">
               {Object.entries(diagnostics?.checks ?? {}).map(([k, v]) => (
@@ -582,9 +586,9 @@ export function ChatPanel() {
           {showRunDetail && (
             <>
               <div className="mb-2 flex flex-wrap gap-2 text-xs">
-                <Badge variant={runDetail?.run?.status === 'failed' ? 'danger' : runDetail?.run?.status === 'approval_pending' ? 'warning' : 'success'}>status={runDetail?.run?.status ?? '-'}</Badge>
-                <Badge>approval={runDetail?.run?.approval_status ?? '-'}</Badge>
-                <Badge>publish={runDetail?.run?.final_publish_status ?? '-'}</Badge>
+                <Badge variant={statusBadgeVariant(runDetail?.run?.status)}>status={runDetail?.run?.status ?? '-'}</Badge>
+                <Badge variant={statusBadgeVariant(runDetail?.run?.approval_status)}>approval={runDetail?.run?.approval_status ?? '-'}</Badge>
+                <Badge variant={statusBadgeVariant(runDetail?.run?.final_publish_status)}>publish={runDetail?.run?.final_publish_status ?? '-'}</Badge>
                 <Badge>active={runDetail?.run?.current_active_step ?? '-'}</Badge>
               </div>
               <div className="text-xs">Run Segment: {runDetail?.run?.segment_id ?? '-'} · topic: {runDetail?.run?.topic_label ?? '-'} · parent: {runDetail?.run?.parent_segment_id ?? '-'}</div>

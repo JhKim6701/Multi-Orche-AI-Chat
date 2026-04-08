@@ -42,6 +42,11 @@ def test_release_candidate_smoke(monkeypatch):
     assert "ollama" in health["checks"]
     assert "qdrant" in health["checks"]
     assert "upload_root" in health["checks"]
+    readiness = client.get("/system/readiness")
+    assert readiness.status_code == 200
+    readiness_payload = readiness.json()
+    assert "ready" in readiness_payload
+    assert "unresolved_dependencies" in readiness_payload
 
     p = client.post("/projects", json={"name": "rc-project", "description": "smoke"}).json()
     c = client.post("/chats", json={"project_id": p["id"], "title": "rc-chat"}).json()
@@ -71,29 +76,28 @@ def test_release_candidate_smoke(monkeypatch):
     assert run.status_code == 200
     run_id = run.json()["id"]
     detail = _wait_run(run_id)
-    assert detail["run"]["status"] in {"approval_pending", "completed"}
+    assert detail["run"]["status"] == "approval_pending"
 
-    if detail["run"]["status"] == "approval_pending":
-        assert client.post(f"/orchestration/runs/{run_id}/approve").status_code == 200
-        approved = _wait_run(run_id)
-        assert approved["run"]["approval_status"] == "approved"
+    assert client.post(f"/orchestration/runs/{run_id}/approve").status_code == 200
+    approved = _wait_run(run_id)
+    assert approved["run"]["approval_status"] == "approved"
 
-        run2 = client.post(
-            "/orchestration/run",
-            json={
-                "project_id": p["id"],
-                "chat_thread_id": c["id"],
-                "content_markdown": "orchestration reject smoke",
-                "selected_model_names": ["rc-model"],
-                "require_approval_before_publish": True,
-            },
-        )
-        run2_id = run2.json()["id"]
-        rejected_pre = _wait_run(run2_id)
-        if rejected_pre["run"]["status"] == "approval_pending":
-            assert client.post(f"/orchestration/runs/{run2_id}/reject").status_code == 200
-            rejected = _wait_run(run2_id)
-            assert rejected["run"]["approval_status"] == "rejected"
+    run2 = client.post(
+        "/orchestration/run",
+        json={
+            "project_id": p["id"],
+            "chat_thread_id": c["id"],
+            "content_markdown": "orchestration reject smoke",
+            "selected_model_names": ["rc-model"],
+            "require_approval_before_publish": True,
+        },
+    )
+    run2_id = run2.json()["id"]
+    rejected_pre = _wait_run(run2_id)
+    assert rejected_pre["run"]["status"] == "approval_pending"
+    assert client.post(f"/orchestration/runs/{run2_id}/reject").status_code == 200
+    rejected = _wait_run(run2_id)
+    assert rejected["run"]["approval_status"] == "rejected"
 
     prefs = client.get("/models/role-preferences")
     assert prefs.status_code == 200
