@@ -73,3 +73,18 @@
 4. orchestration run 생성(approval required)
 5. run detail에서 `approval_pending` 확인
 6. approve/reject 실행 후 최종 상태 확인
+
+## 11) Merge/Release 판단 요약
+
+- Merge gate:
+  - doctor/readiness/health 정합성 확인
+  - smoke core flow 확인
+  - known issues와 backlog 명시 확인
+- Release candidate gate:
+  - demo 최소 성공 흐름 재현
+  - blocker 항목 없음
+  - non-blocker 항목은 backlog(Next/Later)로 추적
+
+참고:
+- `README.md`의 Merge / Release decision flow
+- `docs/roadmaps/release-candidate-backlog.md`

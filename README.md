@@ -146,6 +146,21 @@ npm run build:desktop
    - build: `npm run build:desktop`
 7. 장애 시 복구 순서 적용 (readiness → health → dependency restart)
 
+## Merge / Release decision flow
+
+1. **지금 실행 가능한가?**
+   - doctor + readiness/health 확인
+2. **데모 가능한가?**
+   - 아래 “Demo 최소 성공 시나리오”를 끝까지 수행
+3. **merge해도 되는가?**
+   - blocker 없는지 확인, 남은 항목은 backlog(Next/Later)로 분류
+4. **production blocker는 무엇인가?**
+   - Known issues + roadmap 문서에서 확인
+
+관련 문서:
+- Runbook: `docs/runbooks/local_dev.md`
+- Backlog/Roadmap: `docs/roadmaps/release-candidate-backlog.md`
+
 ## Demo 최소 성공 시나리오
 
 1. `npm run doctor`에서 readiness가 `ready`인지 확인
@@ -155,6 +170,13 @@ npm run build:desktop
 5. Orchestration run 생성 (`require_approval_before_publish=true`)
 6. Run detail에서 `approval_pending` 확인
 7. Approve 또는 Reject 수행 후 최종 상태 확인
+
+## 테스트와 release 판단 연결
+
+- `tests/test_release_smoke.py`: core API smoke gate(project/chat/manual/orchestration/approval/role-pref)
+- `GET /system/health`, `GET /system/readiness`: runtime/preflight gate
+- `npm run doctor`: desktop preflight gate
+- desktop UI regression(components tests): 상태 배지/알림/drawer 렌더링 회귀 확인
 
 ## 핵심 API
 
