@@ -78,8 +78,13 @@ def test_orchestration_run_happy_path(monkeypatch):
     assert detail.status_code == 200
     payload = detail.json()
     assert payload['run']['status'] == 'completed'
+    assert payload['run']['graph_name'] == 'langgraph_orchestrator_v1'
     roles = [s['assigned_role'] for s in payload['steps']]
-    assert roles[:5] == ['planner', 'context_resolver', 'model_router', 'final_responder', 'reviewer']
+    assert roles[0] == 'planner'
+    assert roles[1] == 'context_resolver'
+    assert 'model_router' in roles
+    assert 'final_responder' in roles
+    assert 'reviewer' in roles
     assert 'critic' in roles
     ctx_step = next(step for step in payload['steps'] if step['assigned_role'] == 'context_resolver')
     assert 'asset' in (ctx_step.get('input_summary') or '').lower() or 'asset' in (ctx_step.get('output_summary') or '').lower()

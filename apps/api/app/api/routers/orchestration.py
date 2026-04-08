@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.models import Asset, ConversationSegment, Message, OrchestrationRun, OrchestrationStep
+from app.orchestration.events import step_event_names
 from app.schemas.orchestration import OrchestrationRunCreate, OrchestrationRunDetail, OrchestrationRunOut, OrchestrationStepOut
 from app.services.approval_state import get_pending, mark_approved, mark_rejected
 from app.services.ollama_client import OllamaUnavailableError
@@ -304,20 +305,7 @@ def stream_run_events(run_id: int, db: Session = Depends(get_db)):
         yield f"event: run_started\ndata: {payload('run_started', status=run.status)}\n\n"
         for step in steps:
             meta, _ = _step_meta(step)
-            start_type = "step_started"
-            done_type = "step_completed"
-            if step.step_name == "reviewer_critic":
-                start_type = "reviewer_started"
-                done_type = "reviewer_completed"
-            elif step.step_name == "critic_debate":
-                start_type = "critic_started"
-                done_type = "critic_completed"
-            elif step.step_name == "specialist_analyzer":
-                start_type = "specialist_started"
-                done_type = "specialist_completed"
-            elif step.step_name == "final_responder_revision":
-                start_type = "revision_started"
-                done_type = "revision_completed"
+            start_type, done_type = step_event_names(step)
             if meta.get("retry_count", 0):
                 yield f"event: retry_started\ndata: {payload('retry_started', step_id=step.id, step_name=step.step_name, status='retrying', model_name=step.model_name, retry_count=meta.get('retry_count'))}\n\n"
             if meta.get("fallback_model_name"):
