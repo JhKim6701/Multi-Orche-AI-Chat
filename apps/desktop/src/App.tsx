@@ -7,7 +7,7 @@ import { TopBar } from './components/TopBar';
 
 export function App() {
   return (
-    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: '#fcfcfd' }}>
+    <div className="flex h-screen flex-col bg-background">
       <TopBar />
       <PanelGroup direction="horizontal" autoSaveId="main-layout">
         <Panel defaultSize={20} minSize={15}>

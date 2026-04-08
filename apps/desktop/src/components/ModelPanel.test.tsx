@@ -83,6 +83,7 @@ test('orchestrator ON일 때 role mapping 섹션을 렌더링한다', async () =
   expect(await screen.findByText(/Role-based Model Mapping/i)).toBeTruthy();
   expect(await screen.findByText(/orchestrator/i)).toBeTruthy();
   expect(await screen.findByText(/default: m1/i)).toBeTruthy();
+  expect(await screen.findByText(/candidate/i)).toBeTruthy();
 });
 
 test('orchestrator OFF일 때 manual execution control을 유지한다', async () => {
@@ -163,4 +164,15 @@ test('default/fallback reorder flow', async () => {
   const setDefaultButton = await screen.findByText('set default');
   fireEvent.click(setDefaultButton);
   await waitFor(() => expect(lastPutBody?.preferred_model_names?.[0]).toBeTruthy());
+});
+
+test('default/fallback/candidate 상태 배지를 구분해 표시한다', async () => {
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <ModelPanel />
+    </QueryClientProvider>
+  );
+  expect(await screen.findByText(/default/i)).toBeTruthy();
+  expect(await screen.findByText(/fallback/i)).toBeTruthy();
+  expect(await screen.findByText(/candidate/i)).toBeTruthy();
 });

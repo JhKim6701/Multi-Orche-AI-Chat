@@ -4,6 +4,10 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
 import { useUiStore } from '../store/uiStore';
 import { Asset, MessageListResponse, OrchestrationRun, OrchestrationStep, RolePreference } from '../types/domain';
+import { Alert } from './ui/alert';
+import { Badge } from './ui/badge';
+import { Button } from './ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
 
@@ -546,11 +550,20 @@ export function ChatPanel() {
       )}
 
       {orchestratorOn && (
-        <section style={{ border: '1px solid #eee', borderRadius: 6, padding: 8 }}>
-          <button onClick={() => setShowRunDetail((v) => !v)} style={{ fontSize: 12 }}>{showRunDetail ? 'Hide' : 'Show'} Orchestration Detail</button>
+        <Card>
+          <CardHeader className="flex-row items-center justify-between">
+            <CardTitle>Orchestration Detail</CardTitle>
+            <Button size="sm" variant="outline" onClick={() => setShowRunDetail((v) => !v)}>{showRunDetail ? 'Hide' : 'Show'}</Button>
+          </CardHeader>
+          <CardContent>
           {showRunDetail && (
             <>
-              <div style={{ fontSize: 12, marginTop: 6 }}>Run Status: {runDetail?.run?.status ?? '-'}</div>
+              <div className="mb-2 flex flex-wrap gap-2 text-xs">
+                <Badge variant={runDetail?.run?.status === 'failed' ? 'danger' : runDetail?.run?.status === 'approval_pending' ? 'warning' : 'success'}>status={runDetail?.run?.status ?? '-'}</Badge>
+                <Badge>approval={runDetail?.run?.approval_status ?? '-'}</Badge>
+                <Badge>publish={runDetail?.run?.final_publish_status ?? '-'}</Badge>
+                <Badge>active={runDetail?.run?.current_active_step ?? '-'}</Badge>
+              </div>
               <div style={{ fontSize: 12 }}>Run Segment: {runDetail?.run?.segment_id ?? '-'} · topic: {runDetail?.run?.topic_label ?? '-'} · parent: {runDetail?.run?.parent_segment_id ?? '-'}</div>
               <div style={{ fontSize: 12 }}>Divergence reason: {runDetail?.run?.divergence_reason ?? '-'} · current step: {runDetail?.run?.current_active_step ?? '-'}</div>
               <div style={{ fontSize: 12 }}>
@@ -577,22 +590,22 @@ export function ChatPanel() {
               )}
               {runDetail?.run?.approval_status === 'pending' && selectedRunId && (
                 <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
-                  <button onClick={() => approveRunMutation.mutate(selectedRunId)} style={{ fontSize: 11 }}>Approve publish</button>
-                  <button onClick={() => rejectRunMutation.mutate(selectedRunId)} style={{ fontSize: 11 }}>Reject run</button>
+                  <Button size="sm" onClick={() => approveRunMutation.mutate(selectedRunId)}>Approve publish</Button>
+                  <Button size="sm" variant="destructive" onClick={() => rejectRunMutation.mutate(selectedRunId)}>Reject run</Button>
                 </div>
               )}
               {runDetail?.run?.approval_status === 'pending' && (
-                <div style={{ fontSize: 12, marginTop: 4, background: '#fff7ed', border: '1px solid #fed7aa', padding: 6 }}>
+                <Alert className="mt-1 border-amber-200 bg-amber-50 text-amber-700">
                   승인 전 draft이며 publish 후 메시지/아티팩트/provenance가 즉시 timeline에 반영됩니다.
-                </div>
+                </Alert>
               )}
               {runDetail?.run?.approval_status === 'approved' && runDetail?.final_message && (
-                <div style={{ fontSize: 12, marginTop: 4, background: '#ecfdf3', border: '1px solid #bbf7d0', padding: 6 }}>
+                <Alert className="mt-1 border-emerald-200 bg-emerald-50 text-emerald-700">
                   Published result: {runDetail.final_message.content_markdown.slice(0, 220)}
-                </div>
+                </Alert>
               )}
-              {runs.map((r) => <button key={r.id} onClick={() => { setSelectedRunId(r.id); setShowOrchestrationDrawer(true); }} style={{ fontSize: 11, marginRight: 4 }}>#{r.id} {r.status}</button>)}
-              <button type="button" onClick={() => setShowOrchestrationDrawer(true)} style={{ fontSize: 11 }}>Open Visual Panel</button>
+              {runs.map((r) => <Button key={r.id} size="sm" variant="outline" onClick={() => { setSelectedRunId(r.id); setShowOrchestrationDrawer(true); }} className="mr-1">#{r.id} {r.status}</Button>)}
+              <Button type="button" size="sm" variant="outline" onClick={() => setShowOrchestrationDrawer(true)}>Open Visual Panel</Button>
               {runDetail?.steps?.length ? (
                 <ol style={{ marginTop: 6, paddingLeft: 18 }}>
                   {runDetail.steps.map((step) => (
@@ -631,7 +644,8 @@ export function ChatPanel() {
               )}
             </>
           )}
-        </section>
+          </CardContent>
+        </Card>
       )}
 
       <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>

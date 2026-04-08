@@ -1,6 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { api } from '../lib/api';
+import { Alert } from './ui/alert';
+import { Badge } from './ui/badge';
+import { Button } from './ui/button';
+import { Card, CardContent } from './ui/card';
 
 type Hardware = {
   cpu_percent: number;
@@ -58,35 +62,36 @@ export function TopBar() {
   const uiMode = (globalThis as any).__TAURI_INTERNALS__ ? 'desktop-ui' : 'web-ui';
 
   return (
-    <header style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: 8, borderBottom: '1px solid #ddd', fontSize: 12, background: degraded ? '#fff6f6' : '#fafafa' }}>
-      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-        <strong>mode={health?.mode ?? '-'}</strong>
-        <span>ui={uiMode}</span>
-        <span>env={health?.env ?? '-'}</span>
-        <span>api={health?.status ?? 'unknown'}</span>
-        <span>db={health?.checks?.database?.ok ? 'ok' : 'down'}</span>
-        <span>ollama={health?.checks?.ollama?.ok ? 'ok' : 'down'}</span>
-        <span>qdrant={health?.checks?.qdrant?.ok ? 'ok' : 'down'}</span>
-        <span>upload={health?.checks?.upload_root?.ok ? 'ok' : 'down'}</span>
-        <button style={{ fontSize: 11 }} onClick={() => { refetchHealth(); refetchHw(); }}>Retry checks</button>
-      </div>
-      <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-        <span>CPU {data?.cpu_percent?.toFixed(1) ?? '-'}%</span>
-        <span>MEM {data?.memory_percent?.toFixed(1) ?? '-'}%</span>
-        <span>DISK {data?.disk_percent?.toFixed(1) ?? '-'}%</span>
-        <span>GPU HW {data?.gpu_available ? 'available' : 'N/A'}</span>
-        <span>GPU USE {data?.gpu_usage?.toFixed(1) ?? '-'}%</span>
-        <span>GPU MEM {data?.gpu_memory?.toFixed(1) ?? '-'}%</span>
-        <button style={{ fontSize: 11 }} onClick={() => gpuToggle.mutate(!(data?.gpu_enabled ?? true))}>GPU ROUTING {data?.gpu_enabled ? 'ON' : 'OFF'}</button>
-        <span style={{ color: '#555' }}>data_root={runtime?.data_root ?? health?.data_root ?? '-'}</span>
-        <span style={{ color: '#555' }}>api={import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'}</span>
-        <span style={{ color: '#555' }}>ollama={runtime?.ollama_base_url ?? '-'}</span>
-      </div>
-      {degraded && (
-        <div style={{ color: '#b42318', fontSize: 11 }}>
-          의존성 준비가 완료되지 않았습니다. unresolved={(health?.unresolved_dependencies ?? []).join(', ') || 'none'} · {health?.doctor_hint ?? 'npm run doctor로 점검하세요.'}
-        </div>
-      )}
+    <header className="border-b border-border bg-muted p-2">
+      <Card className={degraded ? 'border-red-200' : ''}>
+        <CardContent className="space-y-2 p-2 text-xs">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="info">mode={health?.mode ?? '-'}</Badge>
+            <Badge>ui={uiMode}</Badge>
+            <Badge>env={health?.env ?? '-'}</Badge>
+            <Badge variant={health?.status === 'ok' ? 'success' : 'warning'}>api={health?.status ?? 'unknown'}</Badge>
+            <Badge variant={health?.checks?.database?.ok ? 'success' : 'danger'}>db={health?.checks?.database?.ok ? 'ok' : 'down'}</Badge>
+            <Badge variant={health?.checks?.ollama?.ok ? 'success' : 'danger'}>ollama={health?.checks?.ollama?.ok ? 'ok' : 'down'}</Badge>
+            <Badge variant={health?.checks?.qdrant?.ok ? 'success' : 'danger'}>qdrant={health?.checks?.qdrant?.ok ? 'ok' : 'down'}</Badge>
+            <Button size="sm" variant="outline" onClick={() => { refetchHealth(); refetchHw(); }}>Retry checks</Button>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge>CPU {data?.cpu_percent?.toFixed(1) ?? '-'}%</Badge>
+            <Badge>MEM {data?.memory_percent?.toFixed(1) ?? '-'}%</Badge>
+            <Badge>DISK {data?.disk_percent?.toFixed(1) ?? '-'}%</Badge>
+            <Badge>GPU HW {data?.gpu_available ? 'available' : 'N/A'}</Badge>
+            <Badge>GPU USE {data?.gpu_usage?.toFixed(1) ?? '-'}%</Badge>
+            <Badge>GPU MEM {data?.gpu_memory?.toFixed(1) ?? '-'}%</Badge>
+            <Button size="sm" variant="outline" onClick={() => gpuToggle.mutate(!(data?.gpu_enabled ?? true))}>GPU ROUTING {data?.gpu_enabled ? 'ON' : 'OFF'}</Button>
+            <span className="text-[11px] text-slate-600">data_root={runtime?.data_root ?? health?.data_root ?? '-'}</span>
+          </div>
+          {degraded && (
+            <Alert className="border-red-200 bg-red-50 text-red-700">
+              의존성 준비가 완료되지 않았습니다. unresolved={(health?.unresolved_dependencies ?? []).join(', ') || 'none'} · {health?.doctor_hint ?? 'npm run doctor로 점검하세요.'}
+            </Alert>
+          )}
+        </CardContent>
+      </Card>
     </header>
   );
 }

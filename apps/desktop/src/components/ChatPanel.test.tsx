@@ -25,6 +25,7 @@ beforeEach(() => {
       { role: 'critic', preferred_model_names: ['m-critic'], default_model_name: 'm-critic', fallback_model_names: [] },
       { role: 'specialist', preferred_model_names: ['m-special'], default_model_name: 'm-special', fallback_model_names: [] },
       { role: 'orchestrator', preferred_model_names: ['m-orch'], default_model_name: 'm-orch', fallback_model_names: [] },
+      { role: 'final_responder', preferred_model_names: ['m-final'], default_model_name: 'm-final', fallback_model_names: [] },
     ]));
     if (url.includes('/orchestration/runs/3')) return Promise.resolve(ok({ run: { id: 3, status: 'completed', routing_reason: 'test-route', reviewer_decision: 'approve', critic_model: 'm-critic', specialist_model: 'm-special' }, steps: [], final_message: { model_name: 'm-final' } }));
     return Promise.resolve(ok({}));
@@ -40,4 +41,5 @@ test('renders orchestration section', async () => {
 
   expect(await screen.findByText(/Orchestration Detail/i)).toBeTruthy();
   expect(await screen.findByText(/Role mapping check/i)).toBeTruthy();
+  expect(await screen.findByText(/status=completed/i)).toBeTruthy();
 });

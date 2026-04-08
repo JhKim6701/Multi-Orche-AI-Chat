@@ -4,6 +4,11 @@ import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/rea
 import { api } from '../lib/api';
 import { useUiStore } from '../store/uiStore';
 import { Model, OrchestrationRole, RoleCandidate, RolePreference } from '../types/domain';
+import { Alert } from './ui/alert';
+import { Badge } from './ui/badge';
+import { Button } from './ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
+import { Separator } from './ui/separator';
 
 const ORCHESTRATION_ROLES: OrchestrationRole[] = [
   'planner',
@@ -21,14 +26,6 @@ export function buildRolePreferenceIndex(preferences: RolePreference[]) {
     acc[pref.role] = pref;
     return acc;
   }, {});
-}
-
-function Badge({ label }: { label: string }) {
-  return (
-    <span style={{ border: '1px solid #ddd', borderRadius: 8, padding: '0 6px', fontSize: 10, background: '#fafafa' }}>
-      {label}
-    </span>
-  );
 }
 
 export function ModelPanel() {
@@ -136,157 +133,174 @@ export function ModelPanel() {
   };
 
   return (
-    <aside style={{ padding: 8, height: '100%', overflow: 'auto', borderLeft: '1px solid #eee' }}>
-      <h3 style={{ margin: '4px 0' }}>Models</h3>
-      <button onClick={() => toggleOrchestrator()} style={{ fontSize: 12, marginBottom: 6 }}>
-        Orchestrator: {orchestratorOn ? 'ON' : 'OFF'}
-      </button>
-
-      {!orchestratorOn && (
-        <div style={{ marginBottom: 8, border: '1px solid #ececec', padding: 6, borderRadius: 6, background: '#fff' }}>
-          <label style={{ fontSize: 12 }}>Manual Execution Mode </label>
-          <select value={executionMode} onChange={(e) => setExecutionMode(e.target.value as any)} style={{ fontSize: 12 }}>
-            <option value="independent">independent</option>
-            <option value="chained">chained</option>
-            <option value="ordered">ordered</option>
-          </select>
-        </div>
-      )}
-
-      <div style={{ marginBottom: 8 }}>
-        <label style={{ fontSize: 12 }}>Orchestrator Model </label>
-        <select
-          value={orchestratorModelName ?? ''}
-          onChange={(e) => setOrchestratorModelName(e.target.value || undefined)}
-          style={{ fontSize: 12 }}
-        >
-          <option value="">(auto fallback)</option>
-          {runnableModels.map((m) => (
-            <option key={m.id} value={m.model_name}>{m.model_name}</option>
-          ))}
-        </select>
+    <aside className="h-full overflow-auto border-l border-border bg-muted/30 p-2">
+      <div className="mb-2 flex items-center justify-between">
+        <h3 className="text-sm font-semibold">Models</h3>
+        <Button size="sm" variant={orchestratorOn ? 'default' : 'outline'} onClick={() => toggleOrchestrator()}>
+          Orchestrator: {orchestratorOn ? 'ON' : 'OFF'}
+        </Button>
       </div>
 
-      <button onClick={() => syncMutation.mutate()} style={{ fontSize: 12 }}>Sync Ollama</button>
-      {syncMutation.error && <p style={{ color: '#b42318', fontSize: 12 }}>Ollama model sync 실패: {(syncMutation.error as Error).message}</p>}
+      {!orchestratorOn && (
+        <Card className="mb-2">
+          <CardContent className="flex items-center gap-2 p-2">
+            <label className="text-xs">Manual Execution Mode</label>
+            <select value={executionMode} onChange={(e) => setExecutionMode(e.target.value as any)} className="rounded border border-border bg-white px-2 py-1 text-xs">
+              <option value="independent">independent</option>
+              <option value="chained">chained</option>
+              <option value="ordered">ordered</option>
+            </select>
+          </CardContent>
+        </Card>
+      )}
 
-      {isLoading ? <p>Loading models...</p> : null}
+      <Card className="mb-2">
+        <CardContent className="p-2">
+          <label className="text-xs">Orchestrator Model</label>
+          <select
+            value={orchestratorModelName ?? ''}
+            onChange={(e) => setOrchestratorModelName(e.target.value || undefined)}
+            className="mt-1 w-full rounded border border-border bg-white px-2 py-1 text-xs"
+          >
+            <option value="">(auto fallback)</option>
+            {runnableModels.map((m) => (
+              <option key={m.id} value={m.model_name}>{m.model_name}</option>
+            ))}
+          </select>
+        </CardContent>
+      </Card>
+
+      <Button size="sm" variant="outline" onClick={() => syncMutation.mutate()}>
+        Sync Ollama
+      </Button>
+      {syncMutation.error && <Alert className="mt-2 border-red-200 bg-red-50 text-red-700">Ollama model sync 실패: {(syncMutation.error as Error).message}</Alert>}
+
+      {isLoading ? <p className="text-xs">Loading models...</p> : null}
       {error ? (
-        <p style={{ color: '#b42318', fontSize: 12 }}>
+        <Alert className="mt-2 border-red-200 bg-red-50 text-red-700">
           모델 목록 로딩 실패. API 연결 상태를 확인하고 다시 시도하세요.
-          <button style={{ marginLeft: 6, fontSize: 11 }} onClick={() => qc.invalidateQueries({ queryKey: ['models'] })}>Retry</button>
-        </p>
+          <Button size="sm" variant="outline" className="ml-2" onClick={() => qc.invalidateQueries({ queryKey: ['models'] })}>Retry</Button>
+        </Alert>
       ) : null}
 
-      {models.map((m) => (
-        <div key={m.id} style={{ borderBottom: '1px solid #efefef', padding: '6px 0' }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
-            <input type="checkbox" checked={selectedModelNames.includes(m.model_name)} onChange={() => toggleSelectedModel(m.model_name)} />
-            {m.model_name}
-          </label>
-          <div style={{ display: 'flex', gap: 4, marginTop: 4, flexWrap: 'wrap' }}>
-            <Badge label={m.downloaded ? 'downloaded' : 'not-downloaded'} />
-            <Badge label={m.enabled ? 'enabled' : 'disabled'} />
-            <Badge label={m.supports_vision ? 'vision' : 'no-vision'} />
-            <Badge label={m.supports_reasoning ? 'reasoning' : 'no-reasoning'} />
-            <Badge label={m.supports_embeddings ? 'embeddings' : 'no-embeddings'} />
-            {m.preferred_roles_json?.length ? <Badge label={`preferred:${m.preferred_roles_json.join(',')}`} /> : null}
-          </div>
-          <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
-            {!m.downloaded && <button style={{ fontSize: 11 }} onClick={() => pullMutation.mutate(m.model_name)}>Download</button>}
-            <button style={{ fontSize: 11 }} onClick={() => toggleMutation.mutate({ id: m.id, enabled: !m.enabled })}>{m.enabled ? 'Disable' : 'Enable'}</button>
-            <button style={{ fontSize: 11 }} onClick={() => sortMutation.mutate({ id: m.id, sortOrder: m.sort_order - 1 })}>↑</button>
-            <button style={{ fontSize: 11 }} onClick={() => sortMutation.mutate({ id: m.id, sortOrder: m.sort_order + 1 })}>↓</button>
-          </div>
-          <small>order {m.sort_order}</small>
-        </div>
-      ))}
+      <div className="mt-2 space-y-2">
+        {models.map((m) => (
+          <Card key={m.id}>
+            <CardContent className="space-y-2 p-2">
+              <label className="flex items-center gap-2 text-xs">
+                <input type="checkbox" checked={selectedModelNames.includes(m.model_name)} onChange={() => toggleSelectedModel(m.model_name)} />
+                {m.model_name}
+              </label>
+              <div className="flex flex-wrap gap-1">
+                <Badge>{m.downloaded ? 'downloaded' : 'not-downloaded'}</Badge>
+                <Badge>{m.enabled ? 'enabled' : 'disabled'}</Badge>
+                <Badge>{m.supports_vision ? 'vision' : 'no-vision'}</Badge>
+                <Badge>{m.supports_reasoning ? 'reasoning' : 'no-reasoning'}</Badge>
+                <Badge>{m.supports_embeddings ? 'embeddings' : 'no-embeddings'}</Badge>
+                {m.preferred_roles_json?.length ? <Badge variant="info">preferred:{m.preferred_roles_json.join(',')}</Badge> : null}
+              </div>
+              <div className="flex gap-1">
+                {!m.downloaded && <Button size="sm" variant="outline" onClick={() => pullMutation.mutate(m.model_name)}>Download</Button>}
+                <Button size="sm" variant="outline" onClick={() => toggleMutation.mutate({ id: m.id, enabled: !m.enabled })}>{m.enabled ? 'Disable' : 'Enable'}</Button>
+                <Button size="sm" variant="outline" onClick={() => sortMutation.mutate({ id: m.id, sortOrder: m.sort_order - 1 })}>↑</Button>
+                <Button size="sm" variant="outline" onClick={() => sortMutation.mutate({ id: m.id, sortOrder: m.sort_order + 1 })}>↓</Button>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
 
       {orchestratorOn && (
         <>
-          <hr />
-          <div style={{ fontSize: 12, marginBottom: 6 }}><strong>Role-based Model Mapping</strong></div>
-          {ORCHESTRATION_ROLES.map((role) => {
-            const pref = rolePreferenceIndex[role];
-            const candidates = roleCandidatesByRole[role] ?? [];
-            const selected = pref?.preferred_model_names ?? [];
-            return (
-              <div key={role} style={{ border: '1px solid #ececec', borderRadius: 6, padding: 6, marginBottom: 6, background: '#fff' }}>
-                <div style={{ fontSize: 12, fontWeight: 600 }}>{role}</div>
-                <div style={{ fontSize: 11, marginTop: 2 }}>default: <strong>{pref?.default_model_name ?? '-'}</strong></div>
-                <div style={{ fontSize: 11 }}>fallback: {(pref?.fallback_model_names ?? []).join(', ') || '-'}</div>
-                <div style={{ marginTop: 4, fontSize: 11, color: '#475467' }}>candidate models:</div>
-                {candidates.length === 0 ? (
-                  <div style={{ fontSize: 11, color: '#999' }}>no preferred candidates</div>
-                ) : (
-                  candidates.map((candidate) => (
-                    <div
-                      key={`${role}-${candidate.model_name}`}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 4,
-                        fontSize: 11,
-                        marginTop: 2,
-                        background: candidate.is_default ? '#ecfdf3' : candidate.is_fallback ? '#fff7ed' : candidate.is_preferred ? '#f5f5f5' : '#fff',
-                        border: '1px solid #eee',
-                        borderRadius: 4,
-                        padding: '2px 4px',
-                      }}
-                    >
-                      <input
-                        aria-label={`role-${role}-${candidate.model_name}`}
-                        type="checkbox"
-                        checked={selected.includes(candidate.model_name)}
-                        onChange={() => updateRoleSelection(role, candidate.model_name)}
-                        disabled={updateRolePreferenceMutation.isPending}
-                      />
-                      <span>{candidate.model_name}</span>
-                      {candidate.is_default && <Badge label="default" />}
-                      {candidate.is_fallback && <Badge label="fallback" />}
-                      {!candidate.is_preferred && <Badge label="candidate" />}
-                      <Badge label={`cap:${candidate.capability_score}`} />
-                      <Badge label={`priority:${candidate.priority}`} />
-                      <Badge label={candidate.enabled ? 'enabled' : 'disabled'} />
-                      <button style={{ fontSize: 10 }} onClick={() => setRoleDefault(role, candidate.model_name)} disabled={updateRolePreferenceMutation.isPending}>set default</button>
-                      {candidate.is_preferred && (
-                        <>
-                          <button style={{ fontSize: 10 }} onClick={() => moveRoleOrder(role, candidate.model_name, -1)} disabled={updateRolePreferenceMutation.isPending}>↑pref</button>
-                          <button style={{ fontSize: 10 }} onClick={() => moveRoleOrder(role, candidate.model_name, 1)} disabled={updateRolePreferenceMutation.isPending}>↓pref</button>
-                        </>
-                      )}
-                    </div>
-                  ))
-                )}
-              </div>
-            );
-          })}
-          {updateRolePreferenceMutation.error && (
-            <div style={{ color: '#b42318', fontSize: 11 }}>
-              role preference update 실패: {(updateRolePreferenceMutation.error as Error).message}
-              <button style={{ marginLeft: 6, fontSize: 11 }} onClick={() => qc.invalidateQueries({ queryKey: ['role-preferences'] })}>refetch</button>
-            </div>
-          )}
+          <Separator />
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle>Role-based Model Mapping</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {ORCHESTRATION_ROLES.map((role) => {
+                const pref = rolePreferenceIndex[role];
+                const candidates = roleCandidatesByRole[role] ?? [];
+                const selected = pref?.preferred_model_names ?? [];
+                return (
+                  <Card key={role} className="bg-white">
+                    <CardContent className="space-y-1 p-2">
+                      <div className="text-xs font-semibold">{role}</div>
+                      <div className="text-xs">default: <strong>{pref?.default_model_name ?? '-'}</strong></div>
+                      <div className="text-xs">fallback: {(pref?.fallback_model_names ?? []).join(', ') || '-'}</div>
+                      <div className="text-[11px] text-slate-600">candidates</div>
+                      {candidates.map((candidate) => (
+                        <div
+                          key={`${role}-${candidate.model_name}`}
+                          className={`flex flex-wrap items-center gap-1 rounded border p-1 text-[11px] ${
+                            candidate.is_default ? 'border-emerald-200 bg-emerald-50'
+                              : candidate.is_fallback ? 'border-amber-200 bg-amber-50'
+                                : candidate.is_preferred ? 'border-blue-200 bg-blue-50' : 'border-border'
+                          }`}
+                        >
+                          <input
+                            aria-label={`role-${role}-${candidate.model_name}`}
+                            type="checkbox"
+                            checked={selected.includes(candidate.model_name)}
+                            onChange={() => updateRoleSelection(role, candidate.model_name)}
+                            disabled={updateRolePreferenceMutation.isPending}
+                          />
+                          <span>{candidate.model_name}</span>
+                          {candidate.is_default && <Badge variant="success">default</Badge>}
+                          {candidate.is_fallback && <Badge variant="warning">fallback</Badge>}
+                          {!candidate.is_preferred && <Badge>candidate</Badge>}
+                          <Badge>cap:{candidate.capability_score}</Badge>
+                          <Badge>priority:{candidate.priority}</Badge>
+                          <Button size="sm" variant="outline" onClick={() => setRoleDefault(role, candidate.model_name)} disabled={updateRolePreferenceMutation.isPending}>set default</Button>
+                          {candidate.is_preferred && (
+                            <>
+                              <Button size="sm" variant="outline" onClick={() => moveRoleOrder(role, candidate.model_name, -1)} disabled={updateRolePreferenceMutation.isPending}>↑pref</Button>
+                              <Button size="sm" variant="outline" onClick={() => moveRoleOrder(role, candidate.model_name, 1)} disabled={updateRolePreferenceMutation.isPending}>↓pref</Button>
+                            </>
+                          )}
+                        </div>
+                      ))}
+                    </CardContent>
+                  </Card>
+                );
+              })}
+              {updateRolePreferenceMutation.error && (
+                <Alert className="border-red-200 bg-red-50 text-red-700">
+                  role preference update 실패: {(updateRolePreferenceMutation.error as Error).message}
+                  <Button size="sm" variant="outline" className="ml-2" onClick={() => qc.invalidateQueries({ queryKey: ['role-preferences'] })}>refetch</Button>
+                </Alert>
+              )}
+            </CardContent>
+          </Card>
         </>
       )}
 
-      <hr />
-      <div style={{ fontSize: 12 }}>
-        <strong>Manual Execution Order (sort_order)</strong>
-        {selectedModelsOrdered.length === 0 ? <div>none</div> : selectedModelsOrdered.map((m, idx) => <div key={m.id}>{idx + 1}. {m.model_name}</div>)}
-      </div>
-      <hr />
-      <div style={{ fontSize: 11, lineHeight: 1.5 }}>
-        <strong>Runtime Settings (read-only)</strong>
-        <div>mode={runtimeInfo?.mode ?? '-'}</div>
-        <div>env={runtimeInfo?.env ?? '-'}</div>
-        <div>data_root={runtimeInfo?.data_root ?? '-'}</div>
-        <div>upload_root={runtimeInfo?.upload_root ?? '-'}</div>
-        <div>database={runtimeInfo?.database_url ?? '-'}</div>
-        <div>qdrant={runtimeInfo?.qdrant_url ?? '-'}</div>
-        <div>ollama={runtimeInfo?.ollama_base_url ?? '-'}</div>
-        <button style={{ fontSize: 11, marginTop: 4 }} onClick={() => refetchRuntime()}>Refresh runtime info</button>
-      </div>
+      <Separator />
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle>Manual Execution Order</CardTitle>
+        </CardHeader>
+        <CardContent className="text-xs">
+          {selectedModelsOrdered.length === 0 ? <div>none</div> : selectedModelsOrdered.map((m, idx) => <div key={m.id}>{idx + 1}. {m.model_name}</div>)}
+        </CardContent>
+      </Card>
+
+      <Separator />
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle>Runtime Settings</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-1 text-[11px]">
+          <div>mode={runtimeInfo?.mode ?? '-'}</div>
+          <div>env={runtimeInfo?.env ?? '-'}</div>
+          <div>data_root={runtimeInfo?.data_root ?? '-'}</div>
+          <div>upload_root={runtimeInfo?.upload_root ?? '-'}</div>
+          <div>database={runtimeInfo?.database_url ?? '-'}</div>
+          <div>qdrant={runtimeInfo?.qdrant_url ?? '-'}</div>
+          <div>ollama={runtimeInfo?.ollama_base_url ?? '-'}</div>
+          <Button size="sm" variant="outline" onClick={() => refetchRuntime()}>Refresh runtime info</Button>
+        </CardContent>
+      </Card>
     </aside>
   );
 }
