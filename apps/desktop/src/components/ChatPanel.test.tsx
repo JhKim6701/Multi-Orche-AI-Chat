@@ -76,3 +76,21 @@ test('toggles diagnostics and retrieval preview', async () => {
   expect(await screen.findByText(/doc.pdf/i)).toBeTruthy();
   expect(await screen.findByText(/packed context preview/i)).toBeTruthy();
 });
+
+test('shows recovery hint on orchestration error', async () => {
+  (global as any).fetch = vi.fn((url: string) => {
+    if (url.includes('/messages?')) return Promise.resolve(ok({ items: [], scope_meta: { scope: 'active', active_segment_id: 1, selected_segment_id: 1, segment_boundaries: [] } }));
+    if (url.includes('/assets/chat/')) return Promise.resolve(ok([]));
+    if (url.includes('/segments?')) return Promise.resolve(ok([{ id: 1, topic_label: 'general', topic_summary: 'summary', is_active: true }]));
+    if (url.includes('/orchestration/runs?')) return Promise.resolve(ok([]));
+    if (url.includes('/models/role-preferences')) return Promise.resolve(ok([]));
+    if (url.includes('/orchestration/run')) return Promise.resolve({ ok: false, json: async () => ({ detail: 'run failed', error: { code: 'ollama_unavailable' } }) });
+    return Promise.resolve(ok({}));
+  });
+
+  render(<QueryClientProvider client={new QueryClient()}><ChatPanel /></QueryClientProvider>);
+  fireEvent.change(await screen.findByPlaceholderText('Type message...'), { target: { value: 'trigger failure' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+  expect(await screen.findByText(/요청 처리 실패/i)).toBeTruthy();
+  expect(await screen.findByText(/Ollama 서버가 내려가 있거나/i)).toBeTruthy();
+});

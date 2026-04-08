@@ -29,7 +29,7 @@ Ollama 기반 로컬 멀티모델 채팅/오케스트레이션 데스크톱 워�
 - `infrastructure/compose`: PostgreSQL/Qdrant
 - `infrastructure/env/.env.example`: 환경 변수 예시
 
-## 실행 방법
+## 실행 방법 (Release Hardening 기준)
 
 ### 1) 환경 변수
 
@@ -56,7 +56,7 @@ pip install -e .[dev]
 uvicorn app.main:app --reload --port 8000
 ```
 
-### 4) Desktop UI 실행
+### 4) Desktop UI 실행 (Web dev mode)
 
 ```bash
 cd apps/desktop
@@ -64,7 +64,7 @@ npm install
 npm run dev
 ```
 
-### 5) Tauri Desktop 실행 (개발/빌드)
+### 5) Desktop mode 실행 (Tauri dev / build)
 
 Tauri prerequisite(Rust toolchain, OS별 WebView/runtime)가 준비된 환경에서:
 
@@ -81,7 +81,7 @@ npm run tauri:dev
 npm run tauri:dev:with-web
 ```
 
-프로덕션 빌드:
+프로덕션 빌드(패키징):
 
 ```bash
 npm run build:desktop
@@ -89,14 +89,22 @@ npm run build:desktop
 
 ## Desktop/Web 실행 모드와 의존성
 
-- **Web 모드**: `MOAC_ENV=dev` + API 백엔드를 별도 프로세스로 실행한 뒤 `npm run dev`.
-- **Desktop 모드**: `MOAC_ENV=desktop` 권장. 기본 data root는 `~/.multi-orche-ai-chat/data`이며, 프론트(Tauri)와 백엔드는 별도 로컬 프로세스로 동작.
-- 현재 구조는 **Tauri 프론트 패키징 + 백엔드 별도 프로세스 실행** 전제를 사용.
-- 선행 의존성:
-  - API 서버 (`uvicorn app.main:app`)
-  - Ollama (`MOAC_OLLAMA_BASE_URL`)
-  - Qdrant (`MOAC_QDRANT_URL`)
-- `npm run doctor`로 desktop 실행 전 `/system/health` + `/system/readiness` 의존성 점검 가능.
+- **Web dev mode**: `MOAC_ENV=dev` + API 백엔드를 별도 프로세스로 실행한 뒤 `npm run dev`.
+- **Desktop mode**: `MOAC_ENV=desktop` 권장. 기본 data root는 `~/.multi-orche-ai-chat/data`.
+- 운영 전제: **Tauri 프론트는 패키징되지만 백엔드는 별도 프로세스로 항상 실행**되어야 함.
+  - 즉, 데스크톱 앱만 실행해도 orchestration/RAG는 동작하지 않으며 backend + Ollama + Qdrant + DB 준비가 필요.
+- 의존성 상태 해석:
+  - `system/readiness`: 실행 전(preflight) 준비 여부 (`ready=true/false`)
+  - `system/health`: 실행 중(runtime) 지속 상태 (`ok/degraded`)
+- `npm run doctor`는 health/readiness를 함께 점검하고, 미준비 항목과 recovery hint를 출력.
+
+## 환경 변수 우선순위
+
+1. **프로세스 환경 변수**(shell export / CI secret)
+2. 프로젝트 루트 `.env` (`infrastructure/env/.env.example` 기반)
+3. 코드 기본값(예: data root fallback)
+
+`MOAC_ENV`, `MOAC_DATA_ROOT`, `MOAC_UPLOAD_ROOT`, `MOAC_DATABASE_URL`, `MOAC_QDRANT_URL`, `MOAC_OLLAMA_BASE_URL`를 우선 관리하세요.
 
 ## 로컬 데이터 저장 위치
 
@@ -104,6 +112,18 @@ npm run build:desktop
 - 업로드/생성 산출물: `${MOAC_UPLOAD_ROOT}` (기본 `${MOAC_DATA_ROOT}/uploads`)
 - 런타임 상태: `${MOAC_DATA_ROOT}/runtime_state.json`
 - 승인 대기/결정 상태는 `orchestration_runs.approval_status`, `pending_payload_json`, `approval_decided_at` DB 필드가 source of truth.
+
+## 장애 시 점검 순서 (권장)
+
+1. `cd apps/desktop && npm run doctor`
+2. `GET /system/readiness`에서 `unresolved_dependencies` 확인
+3. `GET /system/health?verbose=true`로 runtime 상세 확인(dev에서만 민감정보 노출)
+4. 인프라 확인
+   - backend 프로세스
+   - Ollama
+   - Qdrant
+   - DB/Postgres
+5. ChatPanel/TopBar의 degraded alert 및 recovery hint 확인 후 재시도
 
 ## 핵심 API
 

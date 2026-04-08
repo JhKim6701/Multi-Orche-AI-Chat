@@ -386,7 +386,7 @@ export function ChatPanel() {
 
   const statusBadgeVariant = (status?: string) => {
     if (!status) return 'default' as const;
-    if (status.includes('fail')) return 'danger' as const;
+    if (status.includes('fail') || status.includes('reject')) return 'danger' as const;
     if (status.includes('pending') || status.includes('running')) return 'warning' as const;
     if (status.includes('complete') || status.includes('approved') || status.includes('published')) return 'success' as const;
     return 'info' as const;

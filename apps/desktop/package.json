@@ -9,6 +9,7 @@
     "check": "tsc -b --pretty false",
     "test": "vitest",
     "doctor": "node ./scripts/doctor.mjs",
+    "doctor:test": "node --test ./scripts/doctor.test.mjs",
     "tauri:dev": "npm run doctor && tauri dev",
     "tauri:build": "tauri build",
     "tauri:dev:with-web": "concurrently -k \"npm run dev\" \"npm run tauri:dev\"",
