@@ -1,0 +1,44 @@
+{
+  "name": "multi-orche-ai-chat-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "check": "tsc -b --pretty false",
+    "test": "vitest",
+    "doctor": "node ./scripts/doctor.mjs",
+    "doctor:test": "node --test ./scripts/doctor.test.mjs",
+    "tauri:dev": "npm run doctor && tauri dev",
+    "tauri:build": "tauri build",
+    "tauri:dev:with-web": "concurrently -k \"npm run dev\" \"npm run tauri:dev\"",
+    "dev:desktop": "npm run tauri:dev:with-web",
+    "build:desktop": "npm run build && npm run tauri:build"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zustand": "^4.5.4",
+    "@tanstack/react-query": "^5.52.0",
+    "react-resizable-panels": "^2.1.1",
+    "react-router-dom": "^6.26.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.2",
+    "vite": "^5.4.3",
+    "vitest": "^2.0.5",
+    "@testing-library/react": "^16.0.0",
+    "@tauri-apps/cli": "^2.0.2",
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "concurrently": "^9.0.1",
+    "@vitejs/plugin-react": "^4.3.1",
+    "tailwindcss": "^3.4.10",
+    "postcss": "^8.4.45",
+    "autoprefixer": "^10.4.20",
+    "class-variance-authority": "^0.7.0",
+    "tailwind-merge": "^2.5.2",
+    "clsx": "^2.1.1"
+  }
+}

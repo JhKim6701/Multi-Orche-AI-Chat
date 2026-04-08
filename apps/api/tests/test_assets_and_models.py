@@ -1,0 +1,132 @@
+from fastapi.testclient import TestClient
+
+from app.main import app
+from app.services.ollama_client import OllamaClient
+
+client = TestClient(app)
+
+
+async def _mock_list_models(self):
+    return [{'name': 'mistral:latest'}, {'name': 'llama3.1:8b'}]
+
+
+async def _mock_pull(self, model_name: str):
+    return {'status': 'success', 'name': model_name}
+
+
+def test_asset_upload_happy_path(tmp_path, monkeypatch):
+    p = client.post('/projects', json={'name': 'asset-project', 'description': None}).json()
+    c = client.post('/chats', json={'project_id': p['id'], 'title': 'asset-chat'}).json()
+
+    files = {'file': ('hello.txt', b'hello-world', 'text/plain')}
+    data = {'project_id': str(p['id']), 'chat_thread_id': str(c['id']), 'source_type': 'user_upload'}
+    res = client.post('/assets/upload', data=data, files=files)
+    assert res.status_code == 200
+    assert res.json()['original_filename'] == 'hello.txt'
+    asset_id = res.json()['id']
+    status = client.get(f'/assets/{asset_id}/ingestion-status')
+    assert status.status_code == 200
+    assert 'ingestion' in status.json()
+    chunks = client.get(f'/assets/{asset_id}/chunks')
+    assert chunks.status_code == 200
+    assert isinstance(chunks.json(), list)
+
+
+def test_retrieval_debug_endpoint_shape():
+    p = client.post('/projects', json={'name': 'asset-project-debug', 'description': None}).json()
+    c = client.post('/chats', json={'project_id': p['id'], 'title': 'asset-chat-debug'}).json()
+    files = {'file': ('guide.txt', b'deployment guide and troubleshooting checklist', 'text/plain')}
+    data = {'project_id': str(p['id']), 'chat_thread_id': str(c['id']), 'source_type': 'user_upload'}
+    upload = client.post('/assets/upload', data=data, files=files)
+    assert upload.status_code == 200
+    preview = client.get(f"/assets/chat/{c['id']}/retrieval-preview?query=checklist")
+    assert preview.status_code == 200
+    payload = preview.json()
+    assert 'hits' in payload
+    assert 'scope' in payload
+    assert 'packed_meta' in payload
+    if payload['hits']:
+        assert {'chunk_id', 'asset_id', 'score', 'vector_score', 'lexical_score', 'retrieval_mode'}.issubset(payload['hits'][0].keys())
+
+
+def test_model_toggle_and_sort(monkeypatch):
+    monkeypatch.setattr(OllamaClient, 'list_models', _mock_list_models)
+    monkeypatch.setattr(OllamaClient, 'pull_model', _mock_pull)
+
+    sync = client.post('/models/sync')
+    assert sync.status_code == 200
+    model = sync.json()[0]
+
+    toggled = client.patch(f"/models/{model['id']}/toggle", json={'enabled': False})
+    assert toggled.status_code == 200
+    assert toggled.json()['enabled'] is False
+
+    sorted_res = client.patch(f"/models/{model['id']}/sort", json={'sort_order': 99})
+    assert sorted_res.status_code == 200
+    assert sorted_res.json()['sort_order'] == 99
+
+
+def test_role_preference_api_contract(monkeypatch):
+    monkeypatch.setattr(OllamaClient, 'list_models', _mock_list_models)
+    sync = client.post('/models/sync')
+    assert sync.status_code == 200
+    names = [m['model_name'] for m in sync.json()]
+
+    update = client.put('/models/role-preferences/orchestrator', json={'preferred_model_names': names})
+    assert update.status_code == 200
+    payload = update.json()
+    assert payload['role'] == 'orchestrator'
+    assert payload['preferred_model_names'] == names
+    assert payload['default_model_name'] == names[0]
+    assert payload['fallback_model_names'] == names[1:]
+
+    listed = client.get('/models/role-preferences')
+    assert listed.status_code == 200
+    orchestrator = next(item for item in listed.json() if item['role'] == 'orchestrator')
+    assert orchestrator['preferred_model_names'] == names
+
+    candidates = client.get('/models/role-candidates/orchestrator')
+    assert candidates.status_code == 200
+    assert [c['model_name'] for c in candidates.json()] == names
+
+
+def test_model_registry_metadata_schema_regression(monkeypatch):
+    monkeypatch.setattr(OllamaClient, 'list_models', _mock_list_models)
+    sync = client.post('/models/sync')
+    assert sync.status_code == 200
+    names = [m['model_name'] for m in sync.json()]
+    update = client.put('/models/role-preferences/reviewer', json={'preferred_model_names': names[::-1]})
+    assert update.status_code == 200
+
+    registry = client.get('/models')
+    assert registry.status_code == 200
+    reviewer_models = [m for m in registry.json() if 'reviewer' in (m.get('preferred_roles_json') or [])]
+    assert reviewer_models
+    assert all(isinstance(m.get('metadata_json') or {}, dict) for m in reviewer_models)
+    assert all('role_priority' in (m.get('metadata_json') or {}) for m in reviewer_models)
+
+
+def test_role_candidates_return_even_when_no_preference(monkeypatch):
+    monkeypatch.setattr(OllamaClient, 'list_models', _mock_list_models)
+    sync = client.post('/models/sync')
+    assert sync.status_code == 200
+
+    reset_pref = client.put('/models/role-preferences/orchestrator', json={'preferred_model_names': []})
+    assert reset_pref.status_code == 200
+    candidates = client.get('/models/role-candidates/orchestrator?enabled_only=false')
+    assert candidates.status_code == 200
+    payload = candidates.json()
+    assert len(payload) >= 2
+    assert {'downloaded', 'enabled', 'capability_score', 'is_preferred', 'is_default', 'is_fallback'}.issubset(payload[0].keys())
+
+
+def test_role_candidates_ordering_prefers_default_and_capability(monkeypatch):
+    monkeypatch.setattr(OllamaClient, 'list_models', _mock_list_models)
+    sync = client.post('/models/sync')
+    assert sync.status_code == 200
+    names = [m['model_name'] for m in sync.json()]
+    set_pref = client.put('/models/role-preferences/orchestrator', json={'preferred_model_names': names[::-1]})
+    assert set_pref.status_code == 200
+    payload = client.get('/models/role-candidates/orchestrator?enabled_only=false').json()
+    assert payload[0]['is_default'] is True
+    assert payload[0]['model_name'] == names[::-1][0]
