@@ -48,6 +48,8 @@ def _extract_from_pdf(path: Path) -> tuple[list[ExtractedPart], str, bool, str |
 
 
 def _try_ocr(path: Path, mime: str) -> tuple[str, str]:
+    if not settings.ocr_enabled:
+        return "", "ocr_disabled"
     try:
         import pytesseract  # type: ignore
         from PIL import Image  # type: ignore
@@ -83,6 +85,26 @@ def _extract_parts(asset: Asset) -> tuple[list[ExtractedPart], dict[str, Any]]:
                 rows = list(csv.reader(f))
             meta["extract_status"] = "csv_extracted"
             return [ExtractedPart(text="\n".join([", ".join(r) for r in rows]), page=None)], meta
+
+        if suffix in {".xlsx", ".xlsm"} or "spreadsheet" in mime or "excel" in mime:
+            try:
+                from openpyxl import load_workbook  # type: ignore
+
+                wb = load_workbook(filename=str(path), read_only=True, data_only=True)
+                lines: list[str] = []
+                for ws in wb.worksheets:
+                    lines.append(f"[sheet] {ws.title}")
+                    for row in ws.iter_rows(values_only=True):
+                        values = [str(v).strip() for v in row if v is not None and str(v).strip()]
+                        if values:
+                            lines.append(", ".join(values))
+                text = "\n".join(lines).strip()
+                meta["extract_status"] = "xlsx_extracted"
+                return ([ExtractedPart(text=text, page=None)] if text else []), meta
+            except Exception as exc:
+                meta["extract_status"] = "xlsx_extract_failed"
+                meta["error"] = str(exc)
+                return [], meta
 
         if "pdf" in mime or suffix == ".pdf":
             parts, status, ocr_used, ocr_status = _extract_from_pdf(path)

@@ -10,7 +10,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     app_name: str = "multi-orche-ai-chat-api"
     env: Literal["dev", "prod", "desktop"] = "dev"
-    database_url: str = "sqlite+pysqlite:///./multi_orche.db"
+    database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/multi_orche"
     ollama_base_url: str = "http://localhost:11434"
     qdrant_url: str = "http://localhost:6333"
     qdrant_collection: str = "moac_asset_chunks"
@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     rag_chunk_overlap: int = 120
     rag_retrieve_top_k: int = 8
     rag_pack_max_chars: int = 2600
+    ocr_enabled: bool = True
 
     model_config = SettingsConfigDict(env_file=".env", env_prefix="MOAC_", extra="ignore")
 

@@ -37,6 +37,17 @@ def test_runtime_state_toggle_writes_file():
     assert enabled is True
 
 
+def test_postgresql_first_default():
+    s = Settings()
+    assert s.database_url.startswith("postgresql")
+
+
+def test_sqlite_relative_path_fallback(tmp_path: Path):
+    s = Settings(env='dev', data_root=str(tmp_path / 'sqlite-root'), database_url='sqlite+pysqlite:///./local.db')
+    assert str(s.database_url).startswith('sqlite+pysqlite:///')
+    assert 'local.db' in s.database_url
+
+
 def test_artifact_manager_writes_under_upload_root(tmp_path: Path, monkeypatch):
     class DummyDB:
         def add(self, _obj):

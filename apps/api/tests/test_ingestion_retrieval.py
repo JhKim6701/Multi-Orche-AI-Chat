@@ -1,4 +1,6 @@
 from pathlib import Path
+import types
+import sys
 
 from app.models import Asset, AssetChunk
 import app.services.asset_ingestion as asset_ingestion
@@ -149,6 +151,47 @@ def test_ocr_fallback_metadata_path(monkeypatch, tmp_path: Path):
     asset = _mk_asset(img, 'image/png', 'x.png')
     meta = ingest_asset(db, asset)
     assert meta['ocr_fallback_used'] is True
+
+
+def test_ocr_unavailable_fallback(monkeypatch, tmp_path: Path):
+    img = tmp_path / 'noocr.png'
+    img.write_bytes(b'fake image bytes')
+    monkeypatch.setattr(asset_ingestion.settings, 'ocr_enabled', False)
+    monkeypatch.setattr(asset_ingestion.EmbeddingProvider, 'embed_text', lambda self, t: ([0.1, 0.2, 0.3], {'mode': 'mock'}))
+    monkeypatch.setattr(asset_ingestion.QdrantStore, 'ensure_collection', lambda self, vector_size: {'ok': True})
+    monkeypatch.setattr(asset_ingestion.QdrantStore, 'upsert_points', lambda self, points: {'ok': True, 'count': len(points)})
+
+    db = DummyDB()
+    asset = _mk_asset(img, 'image/png', 'noocr.png')
+    meta = ingest_asset(db, asset)
+    assert meta['ocr_status'] == 'ocr_disabled'
+    assert meta['ingest_pipeline']['chunked'] is False
+
+
+def test_xlsx_ingestion_path(monkeypatch, tmp_path: Path):
+    class _Sheet:
+        title = 'sheet1'
+
+        @staticmethod
+        def iter_rows(values_only=True):
+            return [('col1', 'col2'), ('hello', 'xlsx')]
+
+    class _WB:
+        worksheets = [_Sheet()]
+
+    fake_openpyxl = types.SimpleNamespace(load_workbook=lambda filename, read_only=True, data_only=True: _WB())
+    monkeypatch.setitem(sys.modules, 'openpyxl', fake_openpyxl)
+    monkeypatch.setattr(asset_ingestion.EmbeddingProvider, 'embed_text', lambda self, t: ([0.1, 0.2, 0.3], {'mode': 'mock'}))
+    monkeypatch.setattr(asset_ingestion.QdrantStore, 'ensure_collection', lambda self, vector_size: {'ok': True})
+    monkeypatch.setattr(asset_ingestion.QdrantStore, 'upsert_points', lambda self, points: {'ok': True, 'count': len(points)})
+
+    xlsx = tmp_path / 'a.xlsx'
+    xlsx.write_bytes(b'placeholder')
+    db = DummyDB()
+    asset = _mk_asset(xlsx, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'a.xlsx')
+    meta = ingest_asset(db, asset)
+    assert meta['ingest_status'] == 'xlsx_extracted'
+    assert meta['ingest_pipeline']['chunked'] is True
 
 
 def test_scope_aware_retrieval_prefers_active_segment(monkeypatch):
